@@ -1,0 +1,1407 @@
+"use client";
+
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Download,
+  Upload,
+  Filter,
+  Plus,
+  Check,
+  X,
+  RotateCcw,
+  Pencil,
+  Trash2,
+  Calendar,
+  FileSpreadsheet,
+  Search,
+  DollarSign,
+} from "lucide-react";
+import { Button } from "@/components/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/card";
+import { Input } from "@/components/input";
+import { Label } from "@/components/label";
+import {
+  Select,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+  SelectValue,
+} from "@/components/select";
+import * as XLSX from "xlsx";
+
+/* ────────────────────────────────────────────────────────────────
+   Costanti / util
+──────────────────────────────────────────────────────────────── */
+const STATUSES = [
+  { value: "programmato", label: "Programmato" },
+  { value: "svolto", label: "Svolto" },
+  { value: "annullato", label: "Annullato" },
+  { value: "recuperato", label: "Recuperato" },
+];
+
+const CLIENTI_CANONICI = [
+  "Coface",
+  "Credit Partner",
+  "Credit Solution",
+  "General Service",
+];
+
+const CLEAR_ALL_PASSWORD = "Password.2";
+
+function todayISO() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString().slice(0, 10);
+}
+function nowHM() {
+  const d = new Date();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+/* YYYY-MM-DD da Excel */
+function parseExcelDate(v) {
+  if (v == null || v === "") return "";
+  if (typeof v === "number") return XLSX.SSF.format("yyyy-mm-dd", v);
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+  const m = String(v).match(/(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})/);
+  if (m) {
+    const dd = m[1].padStart(2, "0");
+    const mm = m[2].padStart(2, "0");
+    let yyyy = m[3];
+    if (yyyy.length === 2) yyyy = (Number(yyyy) + 2000).toString();
+    return `${yyyy}-${mm}-${dd}`;
+  }
+  const d = new Date(v);
+  if (!isNaN(+d)) return d.toISOString().slice(0, 10);
+  return "";
+}
+
+/* HH:mm (gestisce 0.41666, 9:30, 9.5, ecc.) */
+function parseExcelTime(v) {
+  const pad = (n) => String(n).padStart(2, "0");
+  if (v == null || v === "") return "";
+  if (typeof v === "number") {
+    let frac = v - Math.floor(v);
+    if (frac === 0 && v >= 0 && v <= 24) return `${pad(Math.floor(v))}:00`;
+    let totalMin = Math.round(frac * 24 * 60);
+    totalMin = ((totalMin % (24 * 60)) + (24 * 60)) % (24 * 60);
+    const hh = Math.floor(totalMin / 60);
+    const mm = totalMin % 60;
+    return `${pad(hh)}:${pad(mm)}`;
+  }
+  if (v instanceof Date) {
+    return `${pad(v.getHours())}:${pad(v.getMinutes())}`;
+  }
+  const s = String(v).trim();
+  const m = s.match(/^(\d{1,2}):(\d{1,2})(?::\d{1,2})?$/);
+  if (m) {
+    const hh = Math.max(0, Math.min(23, parseInt(m[1], 10)));
+    const mm = Math.max(0, Math.min(59, parseInt(m[2], 10)));
+    return `${pad(hh)}:${pad(mm)}`;
+  }
+  if (/^\d+([.,]\d+)?$/.test(s)) {
+    const num = parseFloat(s.replace(",", "."));
+    const totalMin = Math.round(num * 60);
+    const hh = Math.floor(totalMin / 60);
+    const mm = totalMin % 60;
+    return `${pad(hh)}:${pad(mm)}`;
+  }
+  return s;
+}
+
+/* Timestamp cronologico robusto da data/ora (locale) */
+function tsFrom(dateStr, timeStr) {
+  if (!dateStr) return NaN;
+  const m = String(dateStr).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return NaN;
+  const y = +m[1], mo = +m[2], d = +m[3];
+  let hh = 0, mm = 0;
+  if (timeStr) {
+    const t = String(timeStr).match(/^(\d{1,2}):(\d{1,2})$/);
+    if (t) { hh = +t[1]; mm = +t[2]; }
+  }
+  return new Date(y, mo - 1, d, hh, mm, 0, 0).getTime();
+}
+
+function fmtDate(d) {
+  if (!d) return "";
+  try {
+    const [y, m, dd] = d.split("-");
+    return `${dd}/${m}/${y}`;
+  } catch {
+    return d;
+  }
+}
+
+function csvSafe(v) {
+  if (v == null) return "";
+  const s = String(v);
+  return s.includes(",") || s.includes("\n") || s.includes('"')
+    ? `"${s.replace(/"/g, '""')}"`
+    : s;
+}
+
+/* Raggruppa per mese (YYYY-MM -> {month:'MM/YY', count}) */
+function aggregateByMonth(rows, dateKey) {
+  const map = new Map();
+  for (const r of rows) {
+    const d = r?.[dateKey];
+    if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+    const key = d.slice(0, 7);
+    map.set(key, (map.get(key) || 0) + 1);
+  }
+  return Array.from(map.entries())
+    .map(([ym, count]) => {
+      const [y, m] = ym.split("-");
+      return { ym, month: `${m}/${String(y).slice(2)}`, count };
+    })
+    .sort((a, b) => a.ym.localeCompare(b.ym))
+    .slice(-12);
+}
+
+/** Template Excel a 21 colonne (uguale al tuo file) */
+const DEFAULT_HEADERS = [
+  "ID",
+  "ID Contaq",
+  "Data Inserimento",
+  "Ora Inserimento",
+  "Data Appuntamento",
+  "Ora Appuntamento",
+  "Azienda",
+  "Referente",
+  "Telefono",
+  "Email",
+  "Città",
+  "Provincia",
+  "Agente",
+  "Operatore",
+  "Cliente",
+  "Stato",
+  "Data Annullamento",
+  "Note",
+  "Fatturabile",
+  "Fatturato",
+  "Data Fatturazione",
+];
+
+function generateId() {
+  return (
+    Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+  ).toUpperCase();
+}
+
+/* ────────────────────────────────────────────────────────────────
+   LocalStorage helpers
+──────────────────────────────────────────────────────────────── */
+const LS_KEY = "coface_appointments_v1";
+const SETTINGS_KEY = "coface_settings_v1";
+
+function loadFromStorage() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr)
+      ? arr.map((r) => ({
+          ...r,
+          // migrazioni/normalizzazioni
+          stato: r?.stato === "da_recuperare" ? "recuperato" : r?.stato,
+          ora: parseExcelTime(r?.ora || ""),
+          oraInserimento: parseExcelTime(r?.oraInserimento || ""),
+          data: parseExcelDate(r?.data || "") || r?.data || "",
+          dataInserimento: parseExcelDate(r?.dataInserimento || "") || r?.dataInserimento || "",
+        }))
+      : [];
+  } catch {
+    return [];
+  }
+}
+function saveToStorage(rows) {
+  localStorage.setItem(LS_KEY, JSON.stringify(rows));
+}
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+function saveSettings(s) {
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+}
+
+/* ────────────────────────────────────────────────────────────────
+   Editor MODAL
+──────────────────────────────────────────────────────────────── */
+function Editor({
+  editing,
+  setEditing,
+  updateRow,
+  markSvolto,
+  markAnnullato,
+  markRecupero,
+  markFatturato,
+  unmarkFatturato,
+  clientiOpzioni,
+}) {
+  if (!editing) return null;
+  const r = editing;
+  const locked = !!r.fatturato; // blocca modifiche dopo fatturazione
+
+  function change(k, v) {
+    const next = { ...r, [k]: v };
+    setEditing(next);
+    updateRow(r.id, { [k]: v });
+  }
+
+  const commonInputProps = (k) => ({
+    value: r[k] || "",
+    onChange: (e) => change(k, e.target.value),
+    disabled: locked && k !== "note",
+  });
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/30 flex items-end md:items-center justify-center p-4 z-50"
+      onClick={() => setEditing(null)}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-xl w-full md:max-w-3xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between p-4 border-b">
+          <div className="flex items-center gap-2">
+            <Calendar className="h-5 w-5" />
+            <h3 className="font-semibold">Modifica appuntamento</h3>
+          </div>
+        </div>
+
+        <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Inserimento */}
+          <div>
+            <Label>Data inserimento</Label>
+            <Input type="date" value={r.dataInserimento || ""} disabled />
+          </div>
+          <div>
+            <Label>Ora inserimento</Label>
+            <Input type="time" value={r.oraInserimento || ""} disabled />
+          </div>
+
+          {/* Appuntamento */}
+          <div>
+            <Label>Data appuntamento</Label>
+            <Input type="date" {...commonInputProps("data")} />
+          </div>
+          <div>
+            <Label>Ora appuntamento</Label>
+            <Input type="time" {...commonInputProps("ora")} />
+          </div>
+
+          <div className="md:col-span-2">
+            <Label>Azienda</Label>
+            <Input {...commonInputProps("azienda")} />
+          </div>
+          <div>
+            <Label>Referente</Label>
+            <Input {...commonInputProps("referente")} />
+          </div>
+          <div>
+            <Label>Telefono</Label>
+            <Input {...commonInputProps("telefono")} />
+          </div>
+          <div>
+            <Label>Email</Label>
+            <Input {...commonInputProps("email")} />
+          </div>
+
+          {/* Luogo */}
+          <div>
+            <Label>Città</Label>
+            <Input {...commonInputProps("città")} />
+          </div>
+          <div>
+            <Label>Provincia</Label>
+            <Input {...commonInputProps("provincia")} />
+          </div>
+
+          {/* Campi organizzativi */}
+          <div>
+            <Label>Agente</Label>
+            <Input {...commonInputProps("agente")} />
+          </div>
+          <div>
+            <Label>Operatore (chi ha fissato)</Label>
+            <Input {...commonInputProps("operatore")} />
+          </div>
+          <div>
+            <Label>Cliente</Label>
+            <Select
+              value={r.cliente || ""}
+              onValueChange={(v) => change("cliente", v)}
+              disabled={locked}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Seleziona cliente" />
+              </SelectTrigger>
+              <SelectContent>
+                {clientiOpzioni.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* ID Contaq */}
+          <div className="md:col-span-2">
+            <Label>ID Contaq (opzionale)</Label>
+            <Input {...commonInputProps("idContaq")} />
+          </div>
+
+          {/* Stato & amministrazione */}
+          <div>
+            <Label>Stato</Label>
+            <Select
+              value={r.stato}
+              onValueChange={(v) => change("stato", v)}
+              disabled={locked}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {STATUSES.map((s) => (
+                  <SelectItem key={s.value} value={s.value}>
+                    {s.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Data annullamento</Label>
+            <Input type="date" {...commonInputProps("dataAnnullamento")} disabled={locked} />
+          </div>
+          <div>
+            <Label>Data fatturazione</Label>
+            <Input type="date" {...commonInputProps("dataFatturazione")} />
+          </div>
+
+          {/* Note & indirizzo interno */}
+          <div className="md:col-span-2">
+            <Label>Note</Label>
+            <Input {...commonInputProps("note")} />
+          </div>
+          <div className="md:col-span-2">
+            <Label>Indirizzo (solo interno, non esportato)</Label>
+            <Input {...commonInputProps("indirizzo")} />
+          </div>
+        </div>
+
+        <div className="p-4 border-t flex flex-wrap items-center justify-between gap-2">
+          <div className="text-sm opacity-70">ID: {r.id} {r.fatturato ? "• FATTURATO" : ""}</div>
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => { markSvolto(r); setEditing({ ...r, stato: "svolto" }); }}
+              className="gap-2"
+              disabled={locked}
+            >
+              <Check className="h-4 w-4" /> Segna svolto
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                markAnnullato(r);
+                setEditing({ ...r, stato: "annullato", dataAnnullamento: todayISO() });
+              }}
+              className="gap-2"
+              disabled={locked}
+            >
+              <X className="h-4 w-4" /> Annulla
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => { markRecupero(r); setEditing({ ...r, stato: "recuperato" }); }}
+              className="gap-2"
+              disabled={locked}
+              title="Segna Recuperato"
+            >
+              <RotateCcw className="h-4 w-4" /> Recuperato
+            </Button>
+
+            {!r.fatturato ? (
+              <Button
+                onClick={() => {
+                  markFatturato(r);
+                  setEditing({ ...r, fatturato: true, dataFatturazione: todayISO() });
+                }}
+                className="gap-2"
+              >
+                <DollarSign className="h-4 w-4" /> Segna fatturato
+              </Button>
+            ) : (
+              <Button
+                variant="secondary"
+                onClick={() => { unmarkFatturato(r); setEditing({ ...r, fatturato: false, dataFatturazione: "" }); }}
+                className="gap-2"
+              >
+                <DollarSign className="h-4 w-4" /> Togli fatturato
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────
+   BARRE (filtri e azioni)
+──────────────────────────────────────────────────────────────── */
+function FiltersBar({
+  q, setQ,
+  client, setClient, clients,
+  agent, setAgent, agents,
+  creator, setCreator, creators,
+  status, setStatus,
+  month, setMonth,
+  day, setDay,
+  setPage,
+}) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-3">
+      {/* Cerca */}
+      <div className="sm:col-span-2">
+        <Label>Cerca</Label>
+        <div className="relative">
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4" />
+          <Input
+            className="pl-8"
+            placeholder="Azienda, referente, città, note, provincia, ID Contaq…"
+            value={q}
+            onChange={(e) => { setQ(e.target.value); setPage(1); }}
+          />
+        </div>
+      </div>
+
+      {/* Cliente */}
+      <div>
+        <Label>Cliente</Label>
+        <Select value={client} onValueChange={(v) => { setClient(v); setPage(1); }}>
+          <SelectTrigger><SelectValue placeholder="Tutti" /></SelectTrigger>
+          <SelectContent>
+            {clients.map((c) => (
+              <SelectItem key={c} value={c}>
+                {c === "tutti" ? "Tutti" : c}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Agente */}
+      <div>
+        <Label>Agente</Label>
+        <Select value={agent} onValueChange={(v) => { setAgent(v); setPage(1); }}>
+          <SelectTrigger><SelectValue placeholder="Tutti" /></SelectTrigger>
+          <SelectContent>
+            {agents.map((a) => (
+              <SelectItem key={a} value={a}>
+                {a === "tutti" ? "Tutti" : a}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Operatore */}
+      <div>
+        <Label>Operatore</Label>
+        <Select value={creator} onValueChange={(v) => { setCreator(v); setPage(1); }}>
+          <SelectTrigger><SelectValue placeholder="Tutti" /></SelectTrigger>
+          <SelectContent>
+            {creators.map((a) => (
+              <SelectItem key={a} value={a}>
+                {a === "tutti" ? "Tutti" : a}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Stato */}
+      <div>
+        <Label>Stato</Label>
+        <Select value={status} onValueChange={(v) => { setStatus(v); setPage(1); }}>
+          <SelectTrigger><SelectValue placeholder="Tutti" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="tutti">Tutti</SelectItem>
+            {STATUSES.map((s) => (
+              <SelectItem key={s.value} value={s.value}>
+                {s.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Mese/Giorno appuntamento */}
+      <div>
+        <Label>Mese (appuntamento)</Label>
+        <Input type="month" value={month} onChange={(e) => { setMonth(e.target.value); setPage(1); }} />
+      </div>
+      <div>
+        <Label>Giorno (appuntamento)</Label>
+        <Input type="date" value={day} onChange={(e) => { setDay(e.target.value); setPage(1); }} />
+      </div>
+    </div>
+  );
+}
+
+function ActionsBar({
+  addEmptyRow,
+  fileInputRef,
+  importExcel,
+  downloadTemplate,
+  exportExcel,
+  exportCSVFatturazione,
+  exportExcelFatturazione, // NEW
+  clearAll,
+}) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      <Button onClick={addEmptyRow} className="gap-2">
+        <Plus className="h-4 w-4" />
+        Nuovo
+      </Button>
+
+      <Button
+        variant="secondary"
+        className="gap-2"
+        onClick={() => fileInputRef.current?.click()}
+      >
+        <Upload className="h-4 w-4" />
+        Importa Excel
+      </Button>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".xlsx,.xls"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) importExcel(f);
+          e.target.value = "";
+        }}
+      />
+
+      <Button variant="secondary" className="gap-2" onClick={downloadTemplate}>
+        <FileSpreadsheet className="h-4 w-4" />
+        Template
+      </Button>
+
+      <Button variant="outline" className="gap-2" onClick={() => exportExcel(true)}>
+        <Download className="h-4 w-4" />
+        Export (filtrato)
+      </Button>
+
+      <Button variant="outline" className="gap-2" onClick={() => exportExcel(false)}>
+        <Download className="h-4 w-4" />
+        Export (tutto)
+      </Button>
+
+      <Button variant="outline" className="gap-2" onClick={exportCSVFatturazione}>
+        <Download className="h-4 w-4" />
+        CSV Fatturazione
+      </Button>
+
+      <Button variant="outline" className="gap-2" onClick={exportExcelFatturazione}>
+        <Download className="h-4 w-4" />
+        Excel Fatturazione
+      </Button>
+
+      <Button
+        onClick={clearAll}
+        className="gap-2 bg-red-600 hover:bg-red-700 text-white"
+        title="Elimina tutti gli appuntamenti"
+      >
+        <Trash2 className="h-4 w-4" />
+        Svuota tutto
+      </Button>
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────
+   Mini "grafici" senza librerie
+──────────────────────────────────────────────────────────────── */
+/* Bar chart CSS: data = [{label, value}] */
+function BarChartCSS({ title, data, height = 220 }) {
+  const max = Math.max(1, ...data.map((d) => d.value || 0));
+  return (
+    <div className="border rounded-xl p-3">
+      <div className="text-sm font-medium mb-2">{title}</div>
+      <div className="h-[220px] flex items-end gap-2 overflow-x-auto pb-2">
+        {data.map((d, i) => (
+          <div key={i} className="flex flex-col items-center justify-end">
+            <div
+              className="w-[18px] bg-gray-800/80 rounded-t"
+              style={{ height: `${(d.value / max) * height}px` }}
+              title={`${d.label}: ${d.value}`}
+            />
+            <div className="text-[10px] mt-1 text-gray-600">{d.label}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* Donut via CSS conic-gradient */
+function DonutCSS({ title, items }) {
+  // items = [{name, value, color}]
+  const total = items.reduce((s, x) => s + x.value, 0);
+  let acc = 0;
+  const segments = items.map((x) => {
+    const start = (acc / (total || 1)) * 360;
+    acc += x.value;
+    const end = (acc / (total || 1)) * 360;
+    return `${x.color} ${start}deg ${end}deg`;
+  });
+  const gradient = `conic-gradient(${segments.join(", ")})`;
+  return (
+    <div className="border rounded-xl p-3">
+      <div className="text-sm font-medium mb-2">{title}</div>
+      <div className="flex items-center gap-6">
+        <div
+          className="w-40 h-40 rounded-full"
+          style={{ background: gradient }}
+          aria-label="donut"
+          title={items.map((x) => `${x.name}: ${x.value}`).join(" • ")}
+        />
+        <div className="text-sm space-y-2">
+          {items.map((x, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <span className="inline-block w-3 h-3 rounded-sm" style={{ background: x.color }} />
+              <span className="w-28">{x.name}</span>
+              <span className="font-medium">{x.value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────
+   Statistiche per Operatore (KPI + grafici CSS)
+──────────────────────────────────────────────────────────────── */
+function OperatorStatsCard({ rowsAll, rowsFiltered, creators }) {
+  const [selectedOp, setSelectedOp] = React.useState("tutti");
+  const [respectFilters, setRespectFilters] = React.useState(true);
+
+  const base = respectFilters ? rowsFiltered : rowsAll;
+  const dataRows = React.useMemo(
+    () => (selectedOp === "tutti" ? base : base.filter(r => r.operatore === selectedOp)),
+    [base, selectedOp]
+  );
+
+  const kpis = React.useMemo(() => {
+    const out = { tot: 0, programmato: 0, svolto: 0, annullato: 0, recuperato: 0 };
+    for (const r of dataRows) {
+      out.tot++;
+      if (out[r.stato] != null) out[r.stato]++;
+    }
+    out.conv = out.tot ? (out.svolto / out.tot) : 0;
+    out.annRate = out.tot ? (out.annullato / out.tot) : 0;
+    return out;
+  }, [dataRows]);
+
+  const byAppMonth = React.useMemo(() => {
+    const v = aggregateByMonth(dataRows, "data");
+    return v.map(x => ({ label: x.month, value: x.count }));
+  }, [dataRows]);
+
+  const byInsMonth = React.useMemo(() => {
+    const v = aggregateByMonth(dataRows, "dataInserimento");
+    return v.map(x => ({ label: x.month, value: x.count }));
+  }, [dataRows]);
+
+  const byStatus = [
+    { name: "Programmato", value: kpis.programmato, color: "#3b82f6" }, // blue-500
+    { name: "Svolto",      value: kpis.svolto,      color: "#22c55e" }, // green-500
+    { name: "Annullato",   value: kpis.annullato,   color: "#ef4444" }, // red-500
+    { name: "Recuperato",  value: kpis.recuperato,  color: "#f59e0b" }, // amber-500
+  ];
+
+  const chip = (label, value) => (
+    <div className="rounded-2xl border px-4 py-2 text-sm bg-white shadow-sm">
+      <span className="opacity-60 mr-2">{label}</span>
+      <span className="font-semibold">{value}</span>
+    </div>
+  );
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle>Statistiche per Operatore</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Controlli */}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="w-[240px]">
+            <Label>Operatore</Label>
+            <Select value={selectedOp} onValueChange={setSelectedOp}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {creators.map(c => <SelectItem key={c} value={c}>{c === "tutti" ? "Tutti" : c}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <label className="flex items-center gap-2 mt-6">
+            <input
+              type="checkbox"
+              className="h-4 w-4"
+              checked={respectFilters}
+              onChange={(e) => setRespectFilters(e.target.checked)}
+            />
+            <span className="text-sm">Rispetta i filtri sopra</span>
+          </label>
+        </div>
+
+        {/* KPI */}
+        <div className="flex flex-wrap gap-3">
+          {chip("Totale", kpis.tot)}
+          {chip("Svolti", kpis.svolto)}
+          {chip("Annullati", kpis.annullato)}
+          {chip("Recuperati", kpis.recuperato)}
+          {chip("Tasso svolti", `${Math.round(kpis.conv * 100)}%`)}
+          {chip("Tasso annullo", `${Math.round(kpis.annRate * 100)}%`)}
+        </div>
+
+        {/* Grafici (CSS) */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <BarChartCSS title="Appuntamenti per mese" data={byAppMonth} />
+          <BarChartCSS title="Inserimenti per mese" data={byInsMonth} />
+          <DonutCSS title="Ripartizione stati" items={byStatus} />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────
+   Componente principale
+──────────────────────────────────────────────────────────────── */
+export default function CofaceAppuntamentiDashboard() {
+  const fileInputRef = useRef(null);
+  const [rows, setRows] = useState(() => loadFromStorage());
+  const [q, setQ] = useState("");
+  const [agent, setAgent] = useState("tutti");
+  const [creator, setCreator] = useState("tutti"); // Operatore
+  const [client, setClient] = useState("tutti");   // Cliente
+  const [status, setStatus] = useState("tutti");
+  const [month, setMonth] = useState("");          // filtro su Data Appuntamento
+  const [day, setDay] = useState("");              // filtro su Data Appuntamento
+
+  // Ordinamento
+  const [sortBy, setSortBy] = useState("inserimento"); // "inserimento" | "appuntamento"
+  const [sortDir, setSortDir] = useState("asc");       // "asc" | "desc"
+
+  const [editing, setEditing] = useState(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+
+  useEffect(() => { const s = loadSettings(); if (s.pageSize) setPageSize(s.pageSize); }, []);
+  useEffect(() => saveToStorage(rows), [rows]);
+  useEffect(() => saveSettings({ pageSize }), [pageSize]);
+
+  const agents = useMemo(() => {
+    const set = new Set(rows.map((r) => r.agente).filter(Boolean));
+    return ["tutti", ...Array.from(set).sort((a, b) => a.localeCompare(b))];
+  }, [rows]);
+
+  const creators = useMemo(() => {
+    const set = new Set(rows.map((r) => r.operatore).filter(Boolean));
+    return ["tutti", ...Array.from(set).sort((a, b) => a.localeCompare(b))];
+  }, [rows]);
+
+  const clients = useMemo(() => {
+    const dyn = Array.from(new Set(rows.map((r) => r.cliente).filter(Boolean)));
+    const merged = Array.from(new Set([...CLIENTI_CANONICI, ...dyn]));
+    return ["tutti", ...merged];
+  }, [rows]);
+
+  const filtered = useMemo(() => {
+    let out = rows;
+    if (agent !== "tutti")   out = out.filter((r) => r.agente === agent);
+    if (creator !== "tutti") out = out.filter((r) => r.operatore === creator);
+    if (client !== "tutti")  out = out.filter((r) => r.cliente === client);
+    if (status !== "tutti")  out = out.filter((r) => r.stato === status);
+    if (month)               out = out.filter((r) => r.data?.startsWith(month));
+    if (day)                 out = out.filter((r) => r.data === day);
+    if (q.trim()) {
+      const n = q.trim().toLowerCase();
+      out = out.filter((r) =>
+        [
+          r.azienda, r.referente, r.email, r.telefono, r.città,
+          r.indirizzo, r.provincia, r.agente, r.operatore,
+          r.cliente, r.idContaq, r.note,
+        ]
+          .filter(Boolean)
+          .some((v) => String(v).toLowerCase().includes(n))
+      );
+    }
+
+    // Ordinamento CRONOLOGICO ROBUSTO
+    return out.sort((a, b) => {
+      const aKey = sortBy === "inserimento"
+        ? tsFrom(a.dataInserimento, a.oraInserimento)
+        : tsFrom(a.data, a.ora);
+      const bKey = sortBy === "inserimento"
+        ? tsFrom(b.dataInserimento, b.oraInserimento)
+        : tsFrom(b.data, b.ora);
+
+      const aNa = Number.isNaN(aKey);
+      const bNa = Number.isNaN(bKey);
+      if (aNa && bNa) return 0;
+      if (aNa) return sortDir === "asc" ? 1 : -1; // vuoti alla fine in asc
+      if (bNa) return sortDir === "asc" ? -1 : 1;
+
+      return sortDir === "asc" ? aKey - bKey : bKey - aKey;
+    });
+  }, [rows, agent, creator, client, status, month, day, q, sortBy, sortDir]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize);
+  useEffect(() => { if (page > totalPages) setPage(1); }, [totalPages, page]);
+
+  const kpis = useMemo(() => {
+    const base = { programmato: 0, svolto: 0, annullato: 0, recuperato: 0 };
+    for (const r of filtered) base[r.stato] = (base[r.stato] || 0) + 1;
+    const fatturabili = filtered.filter((r) => r.stato === "svolto").length;
+    const fatturati   = filtered.filter((r) => r.fatturato).length;
+    return { ...base, fatturabili, fatturati, totale: filtered.length };
+  }, [filtered]);
+
+  /* ───────────── CRUD helpers ───────────── */
+  function addEmptyRow() {
+    const newRow = {
+      id: generateId(),
+      idContaq: "",
+      dataInserimento: todayISO(),
+      oraInserimento: nowHM(),
+      data: todayISO(),
+      ora: "09:00",
+      azienda: "",
+      referente: "",
+      telefono: "",
+      email: "",
+      indirizzo: "",
+      città: "",
+      provincia: "",
+      agente: "",
+      operatore: "",
+      cliente: "",
+      stato: "programmato",
+      dataAnnullamento: "",
+      note: "",
+      fatturato: false,
+      dataFatturazione: "",
+    };
+    setRows((prev) => [newRow, ...prev]);
+    setEditing(newRow);
+  }
+
+  function updateRow(id, patch) { setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r))); }
+  function removeRow(id)        { setRows((prev) => prev.filter((r) => r.id !== id)); }
+  function markSvolto(r)        { updateRow(r.id, { stato: "svolto" }); }
+  function markAnnullato(r)     { updateRow(r.id, { stato: "annullato", dataAnnullamento: todayISO() }); }
+  function markRecupero(r)      { updateRow(r.id, { stato: "recuperato" }); }
+  function markFatturato(r)     { updateRow(r.id, { fatturato: true,  dataFatturazione: todayISO() }); }
+  function unmarkFatturato(r)   { updateRow(r.id, { fatturato: false, dataFatturazione: "" }); }
+
+  // Pulsante "Svuota tutto" con password
+  function clearAll() {
+    const pwd = prompt(
+      "ATTENZIONE: questa azione elimina TUTTI gli appuntamenti.\n\nInserisci la password per confermare:"
+    );
+    if (pwd !== CLEAR_ALL_PASSWORD) {
+      alert("Password errata. Operazione annullata.");
+      return;
+    }
+    const ok = confirm(
+      "Confermi l'eliminazione DEFINITIVA di TUTTI gli appuntamenti?\nNon potrai annullare questa azione."
+    );
+    if (!ok) return;
+
+    setRows([]);
+    localStorage.removeItem(LS_KEY);
+    setEditing(null);
+    setPage(1);
+    alert("Tutti gli appuntamenti sono stati eliminati.");
+  }
+
+  /* ───────────── Excel Import/Export ───────────── */
+  function downloadTemplate() {
+    const wb = XLSX.utils.book_new();
+    const sample = [
+      {
+        ID: generateId(),
+        "ID Contaq": "",
+        "Data Inserimento": todayISO(),
+        "Ora Inserimento": nowHM(),
+        "Data Appuntamento": todayISO(),
+        "Ora Appuntamento": "09:00",
+        Azienda: "ACME S.p.A.",
+        Referente: "Mario Rossi",
+        Telefono: "021234567",
+        Email: "mario.rossi@example.com",
+        "Città": "Milano",
+        Provincia: "MI",
+        Agente: "Bianchi",
+        Operatore: "Operatore1",
+        Cliente: "Coface",
+        Stato: "programmato",
+        "Data Annullamento": "",
+        Note: "",
+        Fatturabile: "No",
+        Fatturato: "No",
+        "Data Fatturazione": "",
+      },
+    ];
+    const ws = XLSX.utils.json_to_sheet(sample, { header: DEFAULT_HEADERS });
+    XLSX.utils.book_append_sheet(wb, ws, "Appuntamenti");
+    XLSX.writeFile(wb, "template_appuntamenti.xlsx");
+  }
+
+  function importExcel(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const data = new Uint8Array(e.target.result);
+      const wb = XLSX.read(data, { type: "array" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const json = XLSX.utils.sheet_to_json(ws, { defval: "" });
+
+      const mapped = json.map((r) => {
+        let statoRaw = String(r["Stato"] || "")
+          .toLowerCase()
+          .trim()
+          .replace(/\s+/g, "_");
+        if (statoRaw === "da_recuperare") statoRaw = "recuperato";
+        const allowed = ["programmato", "svolto", "annullato", "recuperato"];
+        const stato = allowed.includes(statoRaw) ? statoRaw : "programmato";
+
+        const fatturatoRaw = String(r["Fatturato"] || "").toLowerCase().trim();
+        const fatturato = ["si", "sì", "true", "1", "x", "yes"].includes(fatturatoRaw);
+
+        return {
+          id: r["ID"] || generateId(),
+          idContaq: r["ID Contaq"] || "",
+          dataInserimento: parseExcelDate(r["Data Inserimento"]) || todayISO(),
+          oraInserimento: parseExcelTime(r["Ora Inserimento"]) || nowHM(),
+          data: parseExcelDate(r["Data Appuntamento"]) || "",
+          ora: parseExcelTime(r["Ora Appuntamento"]) || "",
+          azienda: r["Azienda"] || "",
+          referente: r["Referente"] || "",
+          telefono: r["Telefono"] || "",
+          email: r["Email"] || "",
+          città: r["Città"] || "",
+          provincia: r["Provincia"] || "",
+          agente: r["Agente"] || "",
+          operatore: r["Operatore"] || "",
+          cliente: r["Cliente"] || "",
+          stato,
+          dataAnnullamento: parseExcelDate(r["Data Annullamento"]) || "",
+          note: r["Note"] || "",
+          fatturato,
+          dataFatturazione: parseExcelDate(r["Data Fatturazione"]) || "",
+        };
+      });
+      setRows((prev) => [...mapped, ...prev]);
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function exportExcel(currentOnly = false) {
+    const data = (currentOnly ? filtered : rows).map((r) => ({
+      ID: r.id,
+      "ID Contaq": r.idContaq || "",
+      "Data Inserimento": r.dataInserimento || "",
+      "Ora Inserimento": r.oraInserimento || "",
+      "Data Appuntamento": r.data || "",
+      "Ora Appuntamento": r.ora || "",
+      Azienda: r.azienda || "",
+      Referente: r.referente || "",
+      Telefono: r.telefono || "",
+      Email: r.email || "",
+      "Città": r.città || "",
+      Provincia: r.provincia || "",
+      Agente: r.agente || "",
+      Operatore: r.operatore || "",
+      Cliente: r.cliente || "",
+      Stato: r.stato || "",
+      "Data Annullamento": r.dataAnnullamento || "",
+      Note: r.note || "",
+      Fatturabile: r.stato === "svolto" ? "Sì" : "No",
+      Fatturato: r.fatturato ? "Sì" : "No",
+      "Data Fatturazione": r.dataFatturazione || "",
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(data, { header: DEFAULT_HEADERS });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Appuntamenti");
+    XLSX.writeFile(wb, `export_appuntamenti_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  }
+
+  // CSV per amministrazione: solo “Svolto” NON fatturati
+  function exportCSVFatturazione() {
+    const header = [
+      "ID",
+      "ID Contaq",
+      "Data Inserimento",
+      "Ora Inserimento",
+      "Data Appuntamento",
+      "Ora Appuntamento",
+      "Azienda",
+      "Referente",
+      "Agente",
+      "Operatore",
+      "Cliente",
+      "Provincia",
+      "Fatturabile",
+    ].join(",");
+
+    const lines = filtered
+      .filter((r) => r.stato === "svolto" && !r.fatturato)
+      .map((r) =>
+        [
+          r.id,
+          r.idContaq || "",
+          r.dataInserimento || "",
+          r.oraInserimento || "",
+          r.data || "",
+          r.ora || "",
+          r.azienda || "",
+          r.referente || "",
+          r.agente || "",
+          r.operatore || "",
+          r.cliente || "",
+          r.provincia || "",
+          "Sì",
+        ]
+          .map(csvSafe)
+          .join(",")
+      );
+
+    const blob = new Blob([header + "\n" + lines.join("\n")], {
+      type: "text/csv;charset=utf-8;",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `fatturazione_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // EXCEL per fatturazione: “Svolto” NON fatturati
+  function exportExcelFatturazione() {
+    const data = filtered
+      .filter((r) => r.stato === "svolto" && !r.fatturato)
+      .map((r) => ({
+        ID: r.id,
+        "ID Contaq": r.idContaq || "",
+        "Data Inserimento": r.dataInserimento || "",
+        "Ora Inserimento": r.oraInserimento || "",
+        "Data Appuntamento": r.data || "",
+        "Ora Appuntamento": r.ora || "",
+        Azienda: r.azienda || "",
+        Referente: r.referente || "",
+        Agente: r.agente || "",
+        Operatore: r.operatore || "",
+        Cliente: r.cliente || "",
+        Provincia: r.provincia || "",
+        Fatturabile: "Sì",
+      }));
+    const ws = XLSX.utils.json_to_sheet(data, {
+      header: [
+        "ID", "ID Contaq", "Data Inserimento", "Ora Inserimento",
+        "Data Appuntamento", "Ora Appuntamento",
+        "Azienda", "Referente", "Agente", "Operatore",
+        "Cliente", "Provincia", "Fatturabile",
+      ],
+    });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Fatturazione");
+    XLSX.writeFile(wb, `fatturazione_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  }
+
+  /* ───────────────────────────── UI: 3 RIGHE ───────────────────────────── */
+  function KPI() {
+    const chip = (label, value) => (
+      <div className="rounded-2xl border px-4 py-2 text-sm bg-white shadow-sm">
+        <span className="opacity-60 mr-2">{label}</span>
+        <span className="font-semibold">{value}</span>
+      </div>
+    );
+    return (
+      <div className="flex flex-wrap gap-3">
+        {chip("Totale", kpis.totale)}
+        {chip("Programmato", kpis.programmato)}
+        {chip("Svolto", kpis.svolto)}
+        {chip("Annullato", kpis.annullato)}
+        {chip("Recuperato", kpis.recuperato)}
+        {chip("Fatturabili", kpis.fatturabili)}
+        {chip("Fatturati", kpis.fatturati)}
+      </div>
+    );
+  }
+
+  function Row({ r }) {
+    const statusBadge =
+      {
+        programmato: "bg-blue-50 text-blue-700 border-blue-200",
+        svolto: "bg-green-50 text-green-700 border-green-200",
+        annullato: "bg-red-50 text-red-700 border-red-200",
+        recuperato: "bg-amber-50 text-amber-700 border-amber-200",
+      }[r.stato] || "";
+
+    return (
+      <tr className="border-b hover:bg-gray-50">
+        <td className="p-2 font-mono text-xs opacity-60">{r.id}</td>
+
+        {/* Inserimento */}
+        <td className="p-2 whitespace-nowrap">
+          {fmtDate(r.dataInserimento)}
+          <div className="text-xs opacity-60">{r.oraInserimento}</div>
+        </td>
+
+        {/* Appuntamento */}
+        <td className="p-2 whitespace-nowrap">
+          {fmtDate(r.data)}
+          <div className="text-xs opacity-60">{r.ora}</div>
+        </td>
+
+        <td className="p-2">
+          <div className="font-medium">{r.azienda || <span className="opacity-50">—</span>}</div>
+          <div className="text-xs opacity-60">{r.referente || ""}</div>
+        </td>
+        <td className="p-2">
+          <div>{r.città}</div>
+          <div className="text-xs opacity-60">{r.provincia}</div>
+        </td>
+        <td className="p-2">{r.cliente || <span className="opacity-50">—</span>}</td>
+        <td className="p-2">{r.agente}</td>
+        <td className="p-2">{r.operatore || <span className="opacity-50">—</span>}</td>
+        <td className="p-2">
+          <span className={`text-xs px-2 py-1 rounded-full border ${statusBadge}`}>
+            {STATUSES.find((s) => s.value === r.stato)?.label}
+          </span>
+          {r.stato === "annullato" && r.dataAnnullamento && (
+            <div className="text-xs opacity-60 mt-1">Annullato il {fmtDate(r.dataAnnullamento)}</div>
+          )}
+          {r.fatturato && (
+            <div className="text-[11px] mt-1 px-2 py-0.5 rounded-full border bg-gray-50">
+              Fatturato {r.dataFatturazione ? `(${fmtDate(r.dataFatturazione)})` : ""}
+            </div>
+          )}
+        </td>
+        <td className="p-2 max-w-[260px] truncate" title={r.note}>{r.note}</td>
+        <td className="p-2">
+          <div className="flex gap-1">
+            <Button variant="secondary" size="icon" className="h-8 w-8" onClick={() => setEditing(r)} title="Modifica">
+              <Pencil className="h-4 w-4" />
+            </Button>
+            <Button variant="outline"   size="icon" className="h-8 w-8" onClick={() => markSvolto(r)}   title="Segna svolto" disabled={r.fatturato}><Check className="h-4 w-4" /></Button>
+            <Button variant="outline"   size="icon" className="h-8 w-8" onClick={() => markAnnullato(r)} title="Annulla"      disabled={r.fatturato}><X className="h-4 w-4" /></Button>
+            <Button variant="outline"   size="icon" className="h-8 w-8" onClick={() => markRecupero(r)}  title="Segna recuperato" disabled={r.fatturato}><RotateCcw className="h-4 w-4" /></Button>
+            <Button variant="ghost"     size="icon" className="h-8 w-8" onClick={() => removeRow(r.id)}  title="Elimina"       disabled={r.fatturato}><Trash2 className="h-4 w-4" /></Button>
+          </div>
+        </td>
+      </tr>
+    );
+  }
+
+  /* ───────────────────────────── Render principale ───────────────────────────── */
+  return (
+    <div className="p-6 max-w-7xl mx-auto space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Coface – Gestione Appuntamenti</h1>
+      </div>
+
+      {/* RIGA 1 — CERCA & FILTRI */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2">
+            <Filter className="h-5 w-5" />
+            Cerca & Filtri
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <FiltersBar
+            q={q} setQ={setQ}
+            client={client} setClient={setClient} clients={clients}
+            agent={agent} setAgent={setAgent} agents={agents}
+            creator={creator} setCreator={setCreator} creators={creators}
+            status={status} setStatus={setStatus}
+            month={month} setMonth={setMonth}
+            day={day} setDay={setDay}
+            setPage={setPage}
+          />
+        </CardContent>
+      </Card>
+
+      {/* RIGA 2 — IMPORT & EXPORT */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle>Import & Export</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ActionsBar
+            addEmptyRow={addEmptyRow}
+            fileInputRef={fileInputRef}
+            importExcel={importExcel}
+            downloadTemplate={downloadTemplate}
+            exportExcel={exportExcel}
+            exportCSVFatturazione={exportCSVFatturazione}
+            exportExcelFatturazione={exportExcelFatturazione}
+            clearAll={clearAll}
+          />
+        </CardContent>
+      </Card>
+
+      {/* RIGA 3 — NUMERI (KPI) */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle>Numeri</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <KPI />
+        </CardContent>
+      </Card>
+
+      {/* STATISTICHE PER OPERATORE (senza dipendenze) */}
+      <OperatorStatsCard
+        rowsAll={rows}
+        rowsFiltered={filtered}
+        creators={creators}
+      />
+
+      {/* TABELLA */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle>Elenco appuntamenti</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {/* Ordina per */}
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <div className="flex items-center gap-2">
+              <Label className="whitespace-nowrap">Ordina per</Label>
+
+              <Select
+                value={sortBy}
+                onValueChange={(v) => { setSortBy(v); setPage(1); }}
+              >
+                <SelectTrigger className="w-[220px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="inserimento">Inserimento (data/ora)</SelectItem>
+                  <SelectItem value="appuntamento">Appuntamento (data/ora)</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select
+                value={sortDir}
+                onValueChange={(v) => { setSortDir(v); setPage(1); }}
+              >
+                <SelectTrigger className="w-[160px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="asc">Crescente</SelectItem>
+                  <SelectItem value="desc">Decrescente</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="overflow-auto border rounded-xl">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-left">
+                <tr>
+                  <th className="p-2">ID</th>
+                  <th className="p-2">Inserimento</th>
+                  <th className="p-2">Appuntamento</th>
+                  <th className="p-2">Azienda</th>
+                  <th className="p-2">Luogo</th>
+                  <th className="p-2">Cliente</th>
+                  <th className="p-2">Agente</th>
+                  <th className="p-2">Operatore</th>
+                  <th className="p-2">Stato</th>
+                  <th className="p-2">Note</th>
+                  <th className="p-2">Azioni</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pageRows.map((r) => (<Row key={r.id} r={r} />))}
+                {pageRows.length === 0 && (
+                  <tr><td colSpan={11} className="p-6 text-center text-sm opacity-60">Nessun risultato</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Paginazione */}
+          <div className="flex items-center justify-between mt-4">
+            <div className="text-sm opacity-70">
+              {filtered.length} risultati • Pagina {page} di {totalPages}
+            </div>
+            <div className="flex items-center gap-2">
+              <Label className="text-xs">Righe per pagina</Label>
+              <Input
+                type="number"
+                min={1}
+                max={200}
+                value={pageSize}
+                onChange={(e) => setPageSize(Number(e.target.value || 25))}
+                className="w-[90px]"
+              />
+              <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                Precedente
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
+                Successiva
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <p className="text-xs opacity-60">
+        Nessuna libreria grafica necessaria. Ordinamento cronologico stabile. Import/Export Excel, Excel/CSV fatturazione, stato “Recuperato” e cancellazione protetta inclusi.
+      </p>
+
+      <Editor
+        editing={editing}
+        setEditing={setEditing}
+        updateRow={updateRow}
+        markSvolto={markSvolto}
+        markAnnullato={markAnnullato}
+        markRecupero={markRecupero}
+        markFatturato={markFatturato}
+        unmarkFatturato={unmarkFatturato}
+        clientiOpzioni={clients.slice(1)} // senza "tutti"
+      />
+    </div>
+  );
+}
