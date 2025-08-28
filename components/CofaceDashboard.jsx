@@ -30,21 +30,23 @@ import {
 import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabaseClient";
 
-/* ──────────────────────────────────────────────────────────────
-   Costanti / util
-   ────────────────────────────────────────────────────────────── */
+/* ╭──────────────────────────────────────────────────────────────╮
+   │ Costanti / util                                              │
+   ╰──────────────────────────────────────────────────────────────╯ */
 const STATUSES = [
   { value: "programmato", label: "Programmato" },
   { value: "svolto", label: "Svolto" },
   { value: "annullato", label: "Annullato" },
   { value: "recuperato", label: "Recuperato" },
 ];
+
 const CLIENTI_CANONICI = [
   "Coface",
   "Credit Partner",
   "Credit Solution",
   "General Service",
 ];
+
 const CLEAR_ALL_PASSWORD = "Password.2";
 
 function todayISO() {
@@ -90,8 +92,7 @@ function parseExcelTime(v) {
     const mm = totalMin % 60;
     return `${pad(hh)}:${pad(mm)}`;
   }
-  if (v instanceof Date)
-    return `${pad(v.getHours())}:${pad(v.getMinutes())}`;
+  if (v instanceof Date) return `${pad(v.getHours())}:${pad(v.getMinutes())}`;
   const s = String(v).trim();
   const m = s.match(/^(\d{1,2}):(\d{1,2})(?::\d{1,2})?$/);
   if (m) {
@@ -165,13 +166,21 @@ function generateId() {
   ).toUpperCase();
 }
 
-/* mapping JS <-> DB (città -> citta) */
+/* mapping JS <-> DB (città -> citta) + ***FIX DATE "" -> NULL*** */
 function rowFromDb(db) {
-  return { ...db, città: db.citta || "" };
+  return { ...db, città: db.citta ?? "" };
 }
+const toNull = (v) => (v === "" || v === undefined ? null : v);
 function rowToDb(js) {
   const { città, ...rest } = js || {};
-  return { ...rest, citta: città || "" };
+  return {
+    ...rest,
+    citta: città ?? "",
+    dataInserimento: toNull(rest.dataInserimento),
+    data: toNull(rest.data),
+    dataAnnullamento: toNull(rest.dataAnnullamento),
+    dataFatturazione: toNull(rest.dataFatturazione),
+  };
 }
 
 /* Excel headers del template */
@@ -199,9 +208,9 @@ const DEFAULT_HEADERS = [
   "Data Fatturazione",
 ];
 
-/* ──────────────────────────────────────────────────────────────
-   Editor (modale)
-   ────────────────────────────────────────────────────────────── */
+/* ╭──────────────────────────────────────────────────────────────╮
+   │ Editor (modale)                                              │
+   ╰──────────────────────────────────────────────────────────────╯ */
 function Editor({
   editing,
   setEditing,
@@ -218,10 +227,11 @@ function Editor({
   const locked = !!r.fatturato;
 
   const commonInputProps = (k) => ({
-    value: r[k] || "",
+    value: r[k] ?? "",
     onChange: (e) => {
       const v = e.target.value;
-      setEditing({ ...r, [k]: v });
+      const next = { ...r, [k]: v };
+      setEditing(next);
       updateRow(r.id, { [k]: v });
     },
     disabled: locked && k !== "note",
@@ -343,14 +353,12 @@ function Editor({
               </SelectContent>
             </Select>
           </div>
+
           <div>
             <Label>Data annullamento</Label>
-            <Input
-              type="date"
-              {...commonInputProps("dataAnnullamento")}
-              disabled={locked}
-            />
+            <Input type="date" {...commonInputProps("dataAnnullamento")} />
           </div>
+
           <div>
             <Label>Data fatturazione</Label>
             <Input type="date" {...commonInputProps("dataFatturazione")} />
@@ -441,9 +449,9 @@ function Editor({
   );
 }
 
-/* ──────────────────────────────────────────────────────────────
-   Barre comandi
-   ────────────────────────────────────────────────────────────── */
+/* ╭──────────────────────────────────────────────────────────────╮
+   │ Barre comandi                                                │
+   ╰──────────────────────────────────────────────────────────────╯ */
 function FiltersBar({
   q,
   setQ,
@@ -591,6 +599,7 @@ function FiltersBar({
     </div>
   );
 }
+
 function ActionsBar({
   addEmptyRow,
   fileInputRef,
@@ -630,19 +639,11 @@ function ActionsBar({
         <FileSpreadsheet className="h-4 w-4" />
         Template
       </Button>
-      <Button
-        variant="outline"
-        className="gap-2"
-        onClick={() => exportExcel(true)}
-      >
+      <Button variant="outline" className="gap-2" onClick={() => exportExcel(true)}>
         <Download className="h-4 w-4" />
         Export (filtrato)
       </Button>
-      <Button
-        variant="outline"
-        className="gap-2"
-        onClick={() => exportExcel(false)}
-      >
+      <Button variant="outline" className="gap-2" onClick={() => exportExcel(false)}>
         <Download className="h-4 w-4" />
         Export (tutto)
       </Button>
@@ -650,11 +651,7 @@ function ActionsBar({
         <Download className="h-4 w-4" />
         CSV Fatturazione
       </Button>
-      <Button
-        variant="outline"
-        className="gap-2"
-        onClick={exportExcelFatturazione}
-      >
+      <Button variant="outline" className="gap-2" onClick={exportExcelFatturazione}>
         <Download className="h-4 w-4" />
         Excel Fatturazione
       </Button>
@@ -670,9 +667,9 @@ function ActionsBar({
   );
 }
 
-/* ──────────────────────────────────────────────────────────────
-   “Grafici” CSS (niente dipendenze)
-   ────────────────────────────────────────────────────────────── */
+/* ╭──────────────────────────────────────────────────────────────╮
+   │ “Grafici” CSS (niente dipendenze)                           │
+   ╰──────────────────────────────────────────────────────────────╯ */
 function BarChartCSS({ title, data, height = 220 }) {
   const max = Math.max(1, ...data.map((d) => d.value || 0));
   return (
@@ -707,11 +704,7 @@ function DonutCSS({ title, items }) {
     <div className="border rounded-xl p-3">
       <div className="text-sm font-medium mb-2">{title}</div>
       <div className="flex items-center gap-6">
-        <div
-          className="w-40 h-40 rounded-full"
-          style={{ background: gradient }}
-          aria-label="donut"
-        />
+        <div className="w-40 h-40 rounded-full" style={{ background: gradient }} />
         <div className="text-sm space-y-2">
           {items.map((x, i) => (
             <div key={i} className="flex items-center gap-2">
@@ -736,21 +729,12 @@ function OperatorStatsCard({ rowsAll, rowsFiltered, creators }) {
 
   const base = respectFilters ? rowsFiltered : rowsAll;
   const dataRows = React.useMemo(
-    () =>
-      selectedOp === "tutti"
-        ? base
-        : base.filter((r) => r.operatore === selectedOp),
+    () => (selectedOp === "tutti" ? base : base.filter((r) => r.operatore === selectedOp)),
     [base, selectedOp]
   );
 
   const kpis = React.useMemo(() => {
-    const out = {
-      tot: 0,
-      programmato: 0,
-      svolto: 0,
-      annullato: 0,
-      recuperato: 0,
-    };
+    const out = { tot: 0, programmato: 0, svolto: 0, annullato: 0, recuperato: 0 };
     for (const r of dataRows) {
       out.tot++;
       if (out[r.stato] != null) out[r.stato]++;
@@ -837,9 +821,9 @@ function OperatorStatsCard({ rowsAll, rowsFiltered, creators }) {
   );
 }
 
-/* ──────────────────────────────────────────────────────────────
-   Componente principale
-   ────────────────────────────────────────────────────────────── */
+/* ╭──────────────────────────────────────────────────────────────╮
+   │ Componente principale                                       │
+   ╰──────────────────────────────────────────────────────────────╯ */
 export default function CofaceAppuntamentiDashboard() {
   const fileInputRef = useRef(null);
 
@@ -892,32 +876,21 @@ export default function CofaceAppuntamentiDashboard() {
 
   /* liste dinamiche */
   const agents = useMemo(
-    () => [
-      "tutti",
-      ...Array.from(
-        new Set(rows.map((r) => r.agente).filter(Boolean))
-      ).sort((a, b) => a.localeCompare(b)),
-    ],
+    () =>
+      ["tutti", ...Array.from(new Set(rows.map((r) => r.agente).filter(Boolean))).sort((a, b) => a.localeCompare(b))],
     [rows]
   );
   const creators = useMemo(
-    () => [
-      "tutti",
-      ...Array.from(
-        new Set(rows.map((r) => r.operatore).filter(Boolean))
-      ).sort((a, b) => a.localeCompare(b)),
-    ],
+    () =>
+      ["tutti", ...Array.from(new Set(rows.map((r) => r.operatore).filter(Boolean))).sort((a, b) => a.localeCompare(b))],
     [rows]
   );
   const clients = useMemo(
-    () => [
-      "tutti",
-      ...Array.from(new Set([...CLIENTI_CANONICI, ...rows.map((r) => r.cliente).filter(Boolean)])),
-    ],
+    () => ["tutti", ...Array.from(new Set([...CLIENTI_CANONICI, ...rows.map((r) => r.cliente).filter(Boolean)]))],
     [rows]
   );
 
-  /* filtra + ordina */
+  /* filtra + ordina in modo robusto */
   const filtered = useMemo(() => {
     let out = rows;
     if (agent !== "tutti") out = out.filter((r) => r.agente === agent);
@@ -1001,10 +974,10 @@ export default function CofaceAppuntamentiDashboard() {
       operatore: "",
       cliente: "",
       stato: "programmato",
-      dataAnnullamento: "",
+      dataAnnullamento: null, // *** NULL ***
       note: "",
       fatturato: false,
-      dataFatturazione: "",
+      dataFatturazione: null, // *** NULL ***
     };
     const { error } = await supabase
       .from("appointments")
@@ -1084,12 +1057,12 @@ export default function CofaceAppuntamentiDashboard() {
     XLSX.utils.book_append_sheet(wb, ws, "Appuntamenti");
     XLSX.writeFile(wb, "template_appuntamenti.xlsx");
   }
+
   function importExcel(file) {
     const reader = new FileReader();
     reader.onload = async (e) => {
-      // ⬇️ Nomi diversi per evitare conflitti
-      const arr = new Uint8Array(e.target.result);
-      const wb = XLSX.read(arr, { type: "array" });
+      const data = new Uint8Array(e.target.result);
+      const wb = XLSX.read(data, { type: "array" });
       const ws = wb.Sheets[wb.SheetNames[0]];
       const json = XLSX.utils.sheet_to_json(ws, { defval: "" });
 
@@ -1099,16 +1072,10 @@ export default function CofaceAppuntamentiDashboard() {
           .trim()
           .replace(/\s+/g, "_");
         if (statoRaw === "da_recuperare") statoRaw = "recuperato";
-        const allowed = [
-          "programmato",
-          "svolto",
-          "annullato",
-          "recuperato",
-        ];
+        const allowed = ["programmato", "svolto", "annullato", "recuperato"];
         const stato = allowed.includes(statoRaw) ? statoRaw : "programmato";
-        const fatturatoRaw = String(r["Fatturato"] || "")
-          .toLowerCase()
-          .trim();
+
+        const fatturatoRaw = String(r["Fatturato"] || "").toLowerCase().trim();
         const fatturato = ["si", "sì", "true", "1", "x", "yes"].includes(
           fatturatoRaw
         );
@@ -1117,9 +1084,13 @@ export default function CofaceAppuntamentiDashboard() {
           id: r["ID"] || generateId(),
           idContaq: r["ID Contaq"] || "",
           dataInserimento: parseExcelDate(r["Data Inserimento"]) || todayISO(),
-          oraInserimento: parseExcelTime(r["Ora Inserimento"]) || nowHM(),
-          data: parseExcelDate(r["Data Appuntamento"]) || "",
+          oraInserimento:
+            parseExcelTime(r["Ora Inserimento"]) || nowHM(),
+
+          // *** se vuote -> NULL ***
+          data: parseExcelDate(r["Data Appuntamento"]) || null,
           ora: parseExcelTime(r["Ora Appuntamento"]) || "",
+
           azienda: r["Azienda"] || "",
           referente: r["Referente"] || "",
           telefono: r["Telefono"] || "",
@@ -1130,22 +1101,21 @@ export default function CofaceAppuntamentiDashboard() {
           operatore: r["Operatore"] || "",
           cliente: r["Cliente"] || "",
           stato,
-          dataAnnullamento: parseExcelDate(r["Data Annullamento"]) || "",
+          dataAnnullamento: parseExcelDate(r["Data Annullamento"]) || null, // ***
           note: r["Note"] || "",
           fatturato,
-          dataFatturazione: parseExcelDate(r["Data Fatturazione"]) || "",
+          dataFatturazione: parseExcelDate(r["Data Fatturazione"]) || null, // ***
         };
         return rowToDb(obj);
       });
 
       await supabase.from("appointments").upsert(mapped, { onConflict: "id" });
-      const { data: dbRows } = await supabase
-        .from("appointments")
-        .select("*");
-      setRows((dbRows || []).map(rowFromDb));
+      const { data: data2 } = await supabase.from("appointments").select("*");
+      setRows((data2 || []).map(rowFromDb));
     };
     reader.readAsArrayBuffer(file);
   }
+
   function exportExcel(currentOnly = false) {
     const data = (currentOnly ? filtered : rows).map((r) => ({
       ID: r.id,
@@ -1178,6 +1148,7 @@ export default function CofaceAppuntamentiDashboard() {
       `export_appuntamenti_${new Date().toISOString().slice(0, 10)}.xlsx`
     );
   }
+
   function exportCSVFatturazione() {
     const header = [
       "ID",
@@ -1225,6 +1196,7 @@ export default function CofaceAppuntamentiDashboard() {
     a.click();
     URL.revokeObjectURL(url);
   }
+
   function exportExcelFatturazione() {
     const data = filtered
       .filter((r) => r.stato === "svolto" && !r.fatturato)
@@ -1288,6 +1260,7 @@ export default function CofaceAppuntamentiDashboard() {
       </div>
     );
   }
+
   function Row({ r }) {
     const statusBadge =
       {
@@ -1559,7 +1532,9 @@ export default function CofaceAppuntamentiDashboard() {
                 min={1}
                 max={200}
                 value={pageSize}
-                onChange={(e) => setPageSize(Number(e.target.value || 25))}
+                onChange={(e) =>
+                  setPageSize(Number(e.target.value || 25))
+                }
                 className="w-[90px]"
               />
               <Button
@@ -1582,8 +1557,8 @@ export default function CofaceAppuntamentiDashboard() {
       </Card>
 
       <p className="text-xs opacity-60">
-        Dati condivisi tramite Supabase (Postgres + Realtime). Import/Export Excel,
-        CSV/Excel fatturazione, stato “Recuperato” e cancellazione protetta inclusi.
+        Dati condivisi tramite Supabase (Postgres + Realtime). Import/Export Excel, CSV/Excel
+        fatturazione, stato “Recuperato” e cancellazione protetta inclusi.
       </p>
 
       <Editor
