@@ -28,24 +28,23 @@ import {
   SelectValue,
 } from "@/components/select";
 import * as XLSX from "xlsx";
+import { supabase } from "@/lib/supabaseClient";
 
-/* ────────────────────────────────────────────────────────────────
+/* ──────────────────────────────────────────────────────────────
    Costanti / util
-──────────────────────────────────────────────────────────────── */
+   ────────────────────────────────────────────────────────────── */
 const STATUSES = [
   { value: "programmato", label: "Programmato" },
   { value: "svolto", label: "Svolto" },
   { value: "annullato", label: "Annullato" },
   { value: "recuperato", label: "Recuperato" },
 ];
-
 const CLIENTI_CANONICI = [
   "Coface",
   "Credit Partner",
   "Credit Solution",
   "General Service",
 ];
-
 const CLEAR_ALL_PASSWORD = "Password.2";
 
 function todayISO() {
@@ -60,7 +59,7 @@ function nowHM() {
   return `${hh}:${mm}`;
 }
 
-/* YYYY-MM-DD da Excel */
+/* YYYY-MM-DD da Excel / stringhe varie */
 function parseExcelDate(v) {
   if (v == null || v === "") return "";
   if (typeof v === "number") return XLSX.SSF.format("yyyy-mm-dd", v);
@@ -78,8 +77,7 @@ function parseExcelDate(v) {
   if (!isNaN(+d)) return d.toISOString().slice(0, 10);
   return "";
 }
-
-/* HH:mm (gestisce 0.41666, 9:30, 9.5, ecc.) */
+/* HH:mm (gestisce 0.4166, 9:30, 9.5, ecc.) */
 function parseExcelTime(v) {
   const pad = (n) => String(n).padStart(2, "0");
   if (v == null || v === "") return "";
@@ -92,9 +90,8 @@ function parseExcelTime(v) {
     const mm = totalMin % 60;
     return `${pad(hh)}:${pad(mm)}`;
   }
-  if (v instanceof Date) {
+  if (v instanceof Date)
     return `${pad(v.getHours())}:${pad(v.getMinutes())}`;
-  }
   const s = String(v).trim();
   const m = s.match(/^(\d{1,2}):(\d{1,2})(?::\d{1,2})?$/);
   if (m) {
@@ -109,23 +106,27 @@ function parseExcelTime(v) {
     const mm = totalMin % 60;
     return `${pad(hh)}:${pad(mm)}`;
   }
-  return s;
+  return s || "";
 }
-
-/* Timestamp cronologico robusto da data/ora (locale) */
+/* timestamp da data/ora locale */
 function tsFrom(dateStr, timeStr) {
   if (!dateStr) return NaN;
   const m = String(dateStr).match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) return NaN;
-  const y = +m[1], mo = +m[2], d = +m[3];
-  let hh = 0, mm = 0;
+  const y = +m[1],
+    mo = +m[2],
+    d = +m[3];
+  let hh = 0,
+    mm = 0;
   if (timeStr) {
     const t = String(timeStr).match(/^(\d{1,2}):(\d{1,2})$/);
-    if (t) { hh = +t[1]; mm = +t[2]; }
+    if (t) {
+      hh = +t[1];
+      mm = +t[2];
+    }
   }
   return new Date(y, mo - 1, d, hh, mm, 0, 0).getTime();
 }
-
 function fmtDate(d) {
   if (!d) return "";
   try {
@@ -135,7 +136,6 @@ function fmtDate(d) {
     return d;
   }
 }
-
 function csvSafe(v) {
   if (v == null) return "";
   const s = String(v);
@@ -143,8 +143,6 @@ function csvSafe(v) {
     ? `"${s.replace(/"/g, '""')}"`
     : s;
 }
-
-/* Raggruppa per mese (YYYY-MM -> {month:'MM/YY', count}) */
 function aggregateByMonth(rows, dateKey) {
   const map = new Map();
   for (const r of rows) {
@@ -161,8 +159,22 @@ function aggregateByMonth(rows, dateKey) {
     .sort((a, b) => a.ym.localeCompare(b.ym))
     .slice(-12);
 }
+function generateId() {
+  return (
+    Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+  ).toUpperCase();
+}
 
-/** Template Excel a 21 colonne (uguale al tuo file) */
+/* mapping JS <-> DB (città -> citta) */
+function rowFromDb(db) {
+  return { ...db, città: db.citta || "" };
+}
+function rowToDb(js) {
+  const { città, ...rest } = js || {};
+  return { ...rest, citta: città || "" };
+}
+
+/* Excel headers del template */
 const DEFAULT_HEADERS = [
   "ID",
   "ID Contaq",
@@ -187,57 +199,9 @@ const DEFAULT_HEADERS = [
   "Data Fatturazione",
 ];
 
-function generateId() {
-  return (
-    Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
-  ).toUpperCase();
-}
-
-/* ────────────────────────────────────────────────────────────────
-   LocalStorage helpers
-──────────────────────────────────────────────────────────────── */
-const LS_KEY = "coface_appointments_v1";
-const SETTINGS_KEY = "coface_settings_v1";
-
-function loadFromStorage() {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return [];
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr)
-      ? arr.map((r) => ({
-          ...r,
-          // migrazioni/normalizzazioni
-          stato: r?.stato === "da_recuperare" ? "recuperato" : r?.stato,
-          ora: parseExcelTime(r?.ora || ""),
-          oraInserimento: parseExcelTime(r?.oraInserimento || ""),
-          data: parseExcelDate(r?.data || "") || r?.data || "",
-          dataInserimento: parseExcelDate(r?.dataInserimento || "") || r?.dataInserimento || "",
-        }))
-      : [];
-  } catch {
-    return [];
-  }
-}
-function saveToStorage(rows) {
-  localStorage.setItem(LS_KEY, JSON.stringify(rows));
-}
-function loadSettings() {
-  try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return {};
-    return JSON.parse(raw);
-  } catch {
-    return {};
-  }
-}
-function saveSettings(s) {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
-}
-
-/* ────────────────────────────────────────────────────────────────
-   Editor MODAL
-──────────────────────────────────────────────────────────────── */
+/* ──────────────────────────────────────────────────────────────
+   Editor (modale)
+   ────────────────────────────────────────────────────────────── */
 function Editor({
   editing,
   setEditing,
@@ -251,17 +215,15 @@ function Editor({
 }) {
   if (!editing) return null;
   const r = editing;
-  const locked = !!r.fatturato; // blocca modifiche dopo fatturazione
-
-  function change(k, v) {
-    const next = { ...r, [k]: v };
-    setEditing(next);
-    updateRow(r.id, { [k]: v });
-  }
+  const locked = !!r.fatturato;
 
   const commonInputProps = (k) => ({
     value: r[k] || "",
-    onChange: (e) => change(k, e.target.value),
+    onChange: (e) => {
+      const v = e.target.value;
+      setEditing({ ...r, [k]: v });
+      updateRow(r.id, { [k]: v });
+    },
     disabled: locked && k !== "note",
   });
 
@@ -319,7 +281,6 @@ function Editor({
             <Input {...commonInputProps("email")} />
           </div>
 
-          {/* Luogo */}
           <div>
             <Label>Città</Label>
             <Input {...commonInputProps("città")} />
@@ -329,20 +290,20 @@ function Editor({
             <Input {...commonInputProps("provincia")} />
           </div>
 
-          {/* Campi organizzativi */}
           <div>
             <Label>Agente</Label>
             <Input {...commonInputProps("agente")} />
           </div>
           <div>
-            <Label>Operatore (chi ha fissato)</Label>
+            <Label>Operatore</Label>
             <Input {...commonInputProps("operatore")} />
           </div>
+
           <div>
             <Label>Cliente</Label>
             <Select
               value={r.cliente || ""}
-              onValueChange={(v) => change("cliente", v)}
+              onValueChange={(v) => updateRow(r.id, { cliente: v })}
               disabled={locked}
             >
               <SelectTrigger>
@@ -358,18 +319,16 @@ function Editor({
             </Select>
           </div>
 
-          {/* ID Contaq */}
           <div className="md:col-span-2">
             <Label>ID Contaq (opzionale)</Label>
             <Input {...commonInputProps("idContaq")} />
           </div>
 
-          {/* Stato & amministrazione */}
           <div>
             <Label>Stato</Label>
             <Select
               value={r.stato}
-              onValueChange={(v) => change("stato", v)}
+              onValueChange={(v) => updateRow(r.id, { stato: v })}
               disabled={locked}
             >
               <SelectTrigger>
@@ -386,30 +345,38 @@ function Editor({
           </div>
           <div>
             <Label>Data annullamento</Label>
-            <Input type="date" {...commonInputProps("dataAnnullamento")} disabled={locked} />
+            <Input
+              type="date"
+              {...commonInputProps("dataAnnullamento")}
+              disabled={locked}
+            />
           </div>
           <div>
             <Label>Data fatturazione</Label>
             <Input type="date" {...commonInputProps("dataFatturazione")} />
           </div>
 
-          {/* Note & indirizzo interno */}
           <div className="md:col-span-2">
             <Label>Note</Label>
             <Input {...commonInputProps("note")} />
           </div>
           <div className="md:col-span-2">
-            <Label>Indirizzo (solo interno, non esportato)</Label>
+            <Label>Indirizzo (solo interno)</Label>
             <Input {...commonInputProps("indirizzo")} />
           </div>
         </div>
 
         <div className="p-4 border-t flex flex-wrap items-center justify-between gap-2">
-          <div className="text-sm opacity-70">ID: {r.id} {r.fatturato ? "• FATTURATO" : ""}</div>
+          <div className="text-sm opacity-70">
+            ID: {r.id} {r.fatturato ? "• FATTURATO" : ""}
+          </div>
           <div className="flex gap-2">
             <Button
               variant="secondary"
-              onClick={() => { markSvolto(r); setEditing({ ...r, stato: "svolto" }); }}
+              onClick={() => {
+                markSvolto(r);
+                setEditing({ ...r, stato: "svolto" });
+              }}
               className="gap-2"
               disabled={locked}
             >
@@ -419,7 +386,11 @@ function Editor({
               variant="outline"
               onClick={() => {
                 markAnnullato(r);
-                setEditing({ ...r, stato: "annullato", dataAnnullamento: todayISO() });
+                setEditing({
+                  ...r,
+                  stato: "annullato",
+                  dataAnnullamento: todayISO(),
+                });
               }}
               className="gap-2"
               disabled={locked}
@@ -428,19 +399,24 @@ function Editor({
             </Button>
             <Button
               variant="outline"
-              onClick={() => { markRecupero(r); setEditing({ ...r, stato: "recuperato" }); }}
+              onClick={() => {
+                markRecupero(r);
+                setEditing({ ...r, stato: "recuperato" });
+              }}
               className="gap-2"
               disabled={locked}
-              title="Segna Recuperato"
             >
               <RotateCcw className="h-4 w-4" /> Recuperato
             </Button>
-
             {!r.fatturato ? (
               <Button
                 onClick={() => {
                   markFatturato(r);
-                  setEditing({ ...r, fatturato: true, dataFatturazione: todayISO() });
+                  setEditing({
+                    ...r,
+                    fatturato: true,
+                    dataFatturazione: todayISO(),
+                  });
                 }}
                 className="gap-2"
               >
@@ -449,7 +425,10 @@ function Editor({
             ) : (
               <Button
                 variant="secondary"
-                onClick={() => { unmarkFatturato(r); setEditing({ ...r, fatturato: false, dataFatturazione: "" }); }}
+                onClick={() => {
+                  unmarkFatturato(r);
+                  setEditing({ ...r, fatturato: false, dataFatturazione: "" });
+                }}
                 className="gap-2"
               >
                 <DollarSign className="h-4 w-4" /> Togli fatturato
@@ -462,22 +441,31 @@ function Editor({
   );
 }
 
-/* ────────────────────────────────────────────────────────────────
-   BARRE (filtri e azioni)
-──────────────────────────────────────────────────────────────── */
+/* ──────────────────────────────────────────────────────────────
+   Barre comandi
+   ────────────────────────────────────────────────────────────── */
 function FiltersBar({
-  q, setQ,
-  client, setClient, clients,
-  agent, setAgent, agents,
-  creator, setCreator, creators,
-  status, setStatus,
-  month, setMonth,
-  day, setDay,
+  q,
+  setQ,
+  client,
+  setClient,
+  clients,
+  agent,
+  setAgent,
+  agents,
+  creator,
+  setCreator,
+  creators,
+  status,
+  setStatus,
+  month,
+  setMonth,
+  day,
+  setDay,
   setPage,
 }) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-3">
-      {/* Cerca */}
       <div className="sm:col-span-2">
         <Label>Cerca</Label>
         <div className="relative">
@@ -486,16 +474,25 @@ function FiltersBar({
             className="pl-8"
             placeholder="Azienda, referente, città, note, provincia, ID Contaq…"
             value={q}
-            onChange={(e) => { setQ(e.target.value); setPage(1); }}
+            onChange={(e) => {
+              setQ(e.target.value);
+              setPage(1);
+            }}
           />
         </div>
       </div>
-
-      {/* Cliente */}
       <div>
         <Label>Cliente</Label>
-        <Select value={client} onValueChange={(v) => { setClient(v); setPage(1); }}>
-          <SelectTrigger><SelectValue placeholder="Tutti" /></SelectTrigger>
+        <Select
+          value={client}
+          onValueChange={(v) => {
+            setClient(v);
+            setPage(1);
+          }}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Tutti" />
+          </SelectTrigger>
           <SelectContent>
             {clients.map((c) => (
               <SelectItem key={c} value={c}>
@@ -505,12 +502,18 @@ function FiltersBar({
           </SelectContent>
         </Select>
       </div>
-
-      {/* Agente */}
       <div>
         <Label>Agente</Label>
-        <Select value={agent} onValueChange={(v) => { setAgent(v); setPage(1); }}>
-          <SelectTrigger><SelectValue placeholder="Tutti" /></SelectTrigger>
+        <Select
+          value={agent}
+          onValueChange={(v) => {
+            setAgent(v);
+            setPage(1);
+          }}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Tutti" />
+          </SelectTrigger>
           <SelectContent>
             {agents.map((a) => (
               <SelectItem key={a} value={a}>
@@ -520,12 +523,18 @@ function FiltersBar({
           </SelectContent>
         </Select>
       </div>
-
-      {/* Operatore */}
       <div>
         <Label>Operatore</Label>
-        <Select value={creator} onValueChange={(v) => { setCreator(v); setPage(1); }}>
-          <SelectTrigger><SelectValue placeholder="Tutti" /></SelectTrigger>
+        <Select
+          value={creator}
+          onValueChange={(v) => {
+            setCreator(v);
+            setPage(1);
+          }}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Tutti" />
+          </SelectTrigger>
           <SelectContent>
             {creators.map((a) => (
               <SelectItem key={a} value={a}>
@@ -535,12 +544,18 @@ function FiltersBar({
           </SelectContent>
         </Select>
       </div>
-
-      {/* Stato */}
       <div>
         <Label>Stato</Label>
-        <Select value={status} onValueChange={(v) => { setStatus(v); setPage(1); }}>
-          <SelectTrigger><SelectValue placeholder="Tutti" /></SelectTrigger>
+        <Select
+          value={status}
+          onValueChange={(v) => {
+            setStatus(v);
+            setPage(1);
+          }}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Tutti" />
+          </SelectTrigger>
           <SelectContent>
             <SelectItem value="tutti">Tutti</SelectItem>
             {STATUSES.map((s) => (
@@ -551,20 +566,31 @@ function FiltersBar({
           </SelectContent>
         </Select>
       </div>
-
-      {/* Mese/Giorno appuntamento */}
       <div>
         <Label>Mese (appuntamento)</Label>
-        <Input type="month" value={month} onChange={(e) => { setMonth(e.target.value); setPage(1); }} />
+        <Input
+          type="month"
+          value={month}
+          onChange={(e) => {
+            setMonth(e.target.value);
+            setPage(1);
+          }}
+        />
       </div>
       <div>
         <Label>Giorno (appuntamento)</Label>
-        <Input type="date" value={day} onChange={(e) => { setDay(e.target.value); setPage(1); }} />
+        <Input
+          type="date"
+          value={day}
+          onChange={(e) => {
+            setDay(e.target.value);
+            setPage(1);
+          }}
+        />
       </div>
     </div>
   );
 }
-
 function ActionsBar({
   addEmptyRow,
   fileInputRef,
@@ -572,7 +598,7 @@ function ActionsBar({
   downloadTemplate,
   exportExcel,
   exportCSVFatturazione,
-  exportExcelFatturazione, // NEW
+  exportExcelFatturazione,
   clearAll,
 }) {
   return (
@@ -581,7 +607,6 @@ function ActionsBar({
         <Plus className="h-4 w-4" />
         Nuovo
       </Button>
-
       <Button
         variant="secondary"
         className="gap-2"
@@ -601,36 +626,42 @@ function ActionsBar({
           e.target.value = "";
         }}
       />
-
       <Button variant="secondary" className="gap-2" onClick={downloadTemplate}>
         <FileSpreadsheet className="h-4 w-4" />
         Template
       </Button>
-
-      <Button variant="outline" className="gap-2" onClick={() => exportExcel(true)}>
+      <Button
+        variant="outline"
+        className="gap-2"
+        onClick={() => exportExcel(true)}
+      >
         <Download className="h-4 w-4" />
         Export (filtrato)
       </Button>
-
-      <Button variant="outline" className="gap-2" onClick={() => exportExcel(false)}>
+      <Button
+        variant="outline"
+        className="gap-2"
+        onClick={() => exportExcel(false)}
+      >
         <Download className="h-4 w-4" />
         Export (tutto)
       </Button>
-
       <Button variant="outline" className="gap-2" onClick={exportCSVFatturazione}>
         <Download className="h-4 w-4" />
         CSV Fatturazione
       </Button>
-
-      <Button variant="outline" className="gap-2" onClick={exportExcelFatturazione}>
+      <Button
+        variant="outline"
+        className="gap-2"
+        onClick={exportExcelFatturazione}
+      >
         <Download className="h-4 w-4" />
         Excel Fatturazione
       </Button>
-
       <Button
         onClick={clearAll}
         className="gap-2 bg-red-600 hover:bg-red-700 text-white"
-        title="Elimina tutti gli appuntamenti"
+        title="Elimina tutti"
       >
         <Trash2 className="h-4 w-4" />
         Svuota tutto
@@ -639,10 +670,9 @@ function ActionsBar({
   );
 }
 
-/* ────────────────────────────────────────────────────────────────
-   Mini "grafici" senza librerie
-──────────────────────────────────────────────────────────────── */
-/* Bar chart CSS: data = [{label, value}] */
+/* ──────────────────────────────────────────────────────────────
+   “Grafici” CSS (niente dipendenze)
+   ────────────────────────────────────────────────────────────── */
 function BarChartCSS({ title, data, height = 220 }) {
   const max = Math.max(1, ...data.map((d) => d.value || 0));
   return (
@@ -663,10 +693,7 @@ function BarChartCSS({ title, data, height = 220 }) {
     </div>
   );
 }
-
-/* Donut via CSS conic-gradient */
 function DonutCSS({ title, items }) {
-  // items = [{name, value, color}]
   const total = items.reduce((s, x) => s + x.value, 0);
   let acc = 0;
   const segments = items.map((x) => {
@@ -684,12 +711,14 @@ function DonutCSS({ title, items }) {
           className="w-40 h-40 rounded-full"
           style={{ background: gradient }}
           aria-label="donut"
-          title={items.map((x) => `${x.name}: ${x.value}`).join(" • ")}
         />
         <div className="text-sm space-y-2">
           {items.map((x, i) => (
             <div key={i} className="flex items-center gap-2">
-              <span className="inline-block w-3 h-3 rounded-sm" style={{ background: x.color }} />
+              <span
+                className="inline-block w-3 h-3 rounded-sm"
+                style={{ background: x.color }}
+              />
               <span className="w-28">{x.name}</span>
               <span className="font-medium">{x.value}</span>
             </div>
@@ -700,45 +729,55 @@ function DonutCSS({ title, items }) {
   );
 }
 
-/* ────────────────────────────────────────────────────────────────
-   Statistiche per Operatore (KPI + grafici CSS)
-──────────────────────────────────────────────────────────────── */
+/* KPI per Operatore */
 function OperatorStatsCard({ rowsAll, rowsFiltered, creators }) {
   const [selectedOp, setSelectedOp] = React.useState("tutti");
   const [respectFilters, setRespectFilters] = React.useState(true);
 
   const base = respectFilters ? rowsFiltered : rowsAll;
   const dataRows = React.useMemo(
-    () => (selectedOp === "tutti" ? base : base.filter(r => r.operatore === selectedOp)),
+    () =>
+      selectedOp === "tutti"
+        ? base
+        : base.filter((r) => r.operatore === selectedOp),
     [base, selectedOp]
   );
 
   const kpis = React.useMemo(() => {
-    const out = { tot: 0, programmato: 0, svolto: 0, annullato: 0, recuperato: 0 };
+    const out = {
+      tot: 0,
+      programmato: 0,
+      svolto: 0,
+      annullato: 0,
+      recuperato: 0,
+    };
     for (const r of dataRows) {
       out.tot++;
       if (out[r.stato] != null) out[r.stato]++;
     }
-    out.conv = out.tot ? (out.svolto / out.tot) : 0;
-    out.annRate = out.tot ? (out.annullato / out.tot) : 0;
+    out.conv = out.tot ? out.svolto / out.tot : 0;
+    out.annRate = out.tot ? out.annullato / out.tot : 0;
     return out;
   }, [dataRows]);
 
-  const byAppMonth = React.useMemo(() => {
-    const v = aggregateByMonth(dataRows, "data");
-    return v.map(x => ({ label: x.month, value: x.count }));
-  }, [dataRows]);
-
-  const byInsMonth = React.useMemo(() => {
-    const v = aggregateByMonth(dataRows, "dataInserimento");
-    return v.map(x => ({ label: x.month, value: x.count }));
-  }, [dataRows]);
+  const byAppMonth = React.useMemo(
+    () => aggregateByMonth(dataRows, "data").map((x) => ({ label: x.month, value: x.count })),
+    [dataRows]
+  );
+  const byInsMonth = React.useMemo(
+    () =>
+      aggregateByMonth(dataRows, "dataInserimento").map((x) => ({
+        label: x.month,
+        value: x.count,
+      })),
+    [dataRows]
+  );
 
   const byStatus = [
-    { name: "Programmato", value: kpis.programmato, color: "#3b82f6" }, // blue-500
-    { name: "Svolto",      value: kpis.svolto,      color: "#22c55e" }, // green-500
-    { name: "Annullato",   value: kpis.annullato,   color: "#ef4444" }, // red-500
-    { name: "Recuperato",  value: kpis.recuperato,  color: "#f59e0b" }, // amber-500
+    { name: "Programmato", value: kpis.programmato, color: "#3b82f6" },
+    { name: "Svolto", value: kpis.svolto, color: "#22c55e" },
+    { name: "Annullato", value: kpis.annullato, color: "#ef4444" },
+    { name: "Recuperato", value: kpis.recuperato, color: "#f59e0b" },
   ];
 
   const chip = (label, value) => (
@@ -754,18 +793,22 @@ function OperatorStatsCard({ rowsAll, rowsFiltered, creators }) {
         <CardTitle>Statistiche per Operatore</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Controlli */}
         <div className="flex flex-wrap items-center gap-3">
           <div className="w-[240px]">
             <Label>Operatore</Label>
             <Select value={selectedOp} onValueChange={setSelectedOp}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
-                {creators.map(c => <SelectItem key={c} value={c}>{c === "tutti" ? "Tutti" : c}</SelectItem>)}
+                {creators.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c === "tutti" ? "Tutti" : c}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
-
           <label className="flex items-center gap-2 mt-6">
             <input
               type="checkbox"
@@ -776,8 +819,6 @@ function OperatorStatsCard({ rowsAll, rowsFiltered, creators }) {
             <span className="text-sm">Rispetta i filtri sopra</span>
           </label>
         </div>
-
-        {/* KPI */}
         <div className="flex flex-wrap gap-3">
           {chip("Totale", kpis.tot)}
           {chip("Svolti", kpis.svolto)}
@@ -786,8 +827,6 @@ function OperatorStatsCard({ rowsAll, rowsFiltered, creators }) {
           {chip("Tasso svolti", `${Math.round(kpis.conv * 100)}%`)}
           {chip("Tasso annullo", `${Math.round(kpis.annRate * 100)}%`)}
         </div>
-
-        {/* Grafici (CSS) */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <BarChartCSS title="Appuntamenti per mese" data={byAppMonth} />
           <BarChartCSS title="Inserimenti per mese" data={byInsMonth} />
@@ -798,102 +837,152 @@ function OperatorStatsCard({ rowsAll, rowsFiltered, creators }) {
   );
 }
 
-/* ────────────────────────────────────────────────────────────────
+/* ──────────────────────────────────────────────────────────────
    Componente principale
-──────────────────────────────────────────────────────────────── */
+   ────────────────────────────────────────────────────────────── */
 export default function CofaceAppuntamentiDashboard() {
   const fileInputRef = useRef(null);
-  const [rows, setRows] = useState(() => loadFromStorage());
+
+  /* dati dal DB */
+  const [rows, setRows] = useState([]);
+
+  /* filtri / ordinamento / UI */
   const [q, setQ] = useState("");
   const [agent, setAgent] = useState("tutti");
-  const [creator, setCreator] = useState("tutti"); // Operatore
-  const [client, setClient] = useState("tutti");   // Cliente
+  const [creator, setCreator] = useState("tutti");
+  const [client, setClient] = useState("tutti");
   const [status, setStatus] = useState("tutti");
-  const [month, setMonth] = useState("");          // filtro su Data Appuntamento
-  const [day, setDay] = useState("");              // filtro su Data Appuntamento
-
-  // Ordinamento
-  const [sortBy, setSortBy] = useState("inserimento"); // "inserimento" | "appuntamento"
-  const [sortDir, setSortDir] = useState("asc");       // "asc" | "desc"
-
+  const [month, setMonth] = useState("");
+  const [day, setDay] = useState("");
+  const [sortBy, setSortBy] = useState("inserimento"); // inserimento | appuntamento
+  const [sortDir, setSortDir] = useState("asc"); // asc | desc
   const [editing, setEditing] = useState(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
 
-  useEffect(() => { const s = loadSettings(); if (s.pageSize) setPageSize(s.pageSize); }, []);
-  useEffect(() => saveToStorage(rows), [rows]);
-  useEffect(() => saveSettings({ pageSize }), [pageSize]);
+  /* primo fetch */
+  useEffect(() => {
+    (async () => {
+      const { data, error } = await supabase
+        .from("appointments")
+        .select("*")
+        .order("dataInserimento", { ascending: true })
+        .order("oraInserimento", { ascending: true });
+      if (!error) setRows((data || []).map(rowFromDb));
+    })();
+  }, []);
 
-  const agents = useMemo(() => {
-    const set = new Set(rows.map((r) => r.agente).filter(Boolean));
-    return ["tutti", ...Array.from(set).sort((a, b) => a.localeCompare(b))];
-  }, [rows]);
+  /* realtime */
+  useEffect(() => {
+    const ch = supabase
+      .channel("realtime:appointments")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "appointments" },
+        async () => {
+          const { data } = await supabase.from("appointments").select("*");
+          setRows((data || []).map(rowFromDb));
+        }
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, []);
 
-  const creators = useMemo(() => {
-    const set = new Set(rows.map((r) => r.operatore).filter(Boolean));
-    return ["tutti", ...Array.from(set).sort((a, b) => a.localeCompare(b))];
-  }, [rows]);
+  /* liste dinamiche */
+  const agents = useMemo(
+    () => [
+      "tutti",
+      ...Array.from(
+        new Set(rows.map((r) => r.agente).filter(Boolean))
+      ).sort((a, b) => a.localeCompare(b)),
+    ],
+    [rows]
+  );
+  const creators = useMemo(
+    () => [
+      "tutti",
+      ...Array.from(
+        new Set(rows.map((r) => r.operatore).filter(Boolean))
+      ).sort((a, b) => a.localeCompare(b)),
+    ],
+    [rows]
+  );
+  const clients = useMemo(
+    () => [
+      "tutti",
+      ...Array.from(new Set([...CLIENTI_CANONICI, ...rows.map((r) => r.cliente).filter(Boolean)])),
+    ],
+    [rows]
+  );
 
-  const clients = useMemo(() => {
-    const dyn = Array.from(new Set(rows.map((r) => r.cliente).filter(Boolean)));
-    const merged = Array.from(new Set([...CLIENTI_CANONICI, ...dyn]));
-    return ["tutti", ...merged];
-  }, [rows]);
-
+  /* filtra + ordina */
   const filtered = useMemo(() => {
     let out = rows;
-    if (agent !== "tutti")   out = out.filter((r) => r.agente === agent);
+    if (agent !== "tutti") out = out.filter((r) => r.agente === agent);
     if (creator !== "tutti") out = out.filter((r) => r.operatore === creator);
-    if (client !== "tutti")  out = out.filter((r) => r.cliente === client);
-    if (status !== "tutti")  out = out.filter((r) => r.stato === status);
-    if (month)               out = out.filter((r) => r.data?.startsWith(month));
-    if (day)                 out = out.filter((r) => r.data === day);
+    if (client !== "tutti") out = out.filter((r) => r.cliente === client);
+    if (status !== "tutti") out = out.filter((r) => r.stato === status);
+    if (month) out = out.filter((r) => r.data?.startsWith(month));
+    if (day) out = out.filter((r) => r.data === day);
     if (q.trim()) {
       const n = q.trim().toLowerCase();
       out = out.filter((r) =>
         [
-          r.azienda, r.referente, r.email, r.telefono, r.città,
-          r.indirizzo, r.provincia, r.agente, r.operatore,
-          r.cliente, r.idContaq, r.note,
+          r.azienda,
+          r.referente,
+          r.email,
+          r.telefono,
+          r.città,
+          r.indirizzo,
+          r.provincia,
+          r.agente,
+          r.operatore,
+          r.cliente,
+          r.idContaq,
+          r.note,
         ]
           .filter(Boolean)
           .some((v) => String(v).toLowerCase().includes(n))
       );
     }
-
-    // Ordinamento CRONOLOGICO ROBUSTO
     return out.sort((a, b) => {
-      const aKey = sortBy === "inserimento"
-        ? tsFrom(a.dataInserimento, a.oraInserimento)
-        : tsFrom(a.data, a.ora);
-      const bKey = sortBy === "inserimento"
-        ? tsFrom(b.dataInserimento, b.oraInserimento)
-        : tsFrom(b.data, b.ora);
-
-      const aNa = Number.isNaN(aKey);
-      const bNa = Number.isNaN(bKey);
+      const aKey =
+        sortBy === "inserimento"
+          ? tsFrom(a.dataInserimento, a.oraInserimento)
+          : tsFrom(a.data, a.ora);
+      const bKey =
+        sortBy === "inserimento"
+          ? tsFrom(b.dataInserimento, b.oraInserimento)
+          : tsFrom(b.data, b.ora);
+      const aNa = Number.isNaN(aKey),
+        bNa = Number.isNaN(bKey);
       if (aNa && bNa) return 0;
-      if (aNa) return sortDir === "asc" ? 1 : -1; // vuoti alla fine in asc
+      if (aNa) return sortDir === "asc" ? 1 : -1;
       if (bNa) return sortDir === "asc" ? -1 : 1;
-
       return sortDir === "asc" ? aKey - bKey : bKey - aKey;
     });
   }, [rows, agent, creator, client, status, month, day, q, sortBy, sortDir]);
 
+  /* paginazione */
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize);
-  useEffect(() => { if (page > totalPages) setPage(1); }, [totalPages, page]);
+  useEffect(() => {
+    if (page > totalPages) setPage(1);
+  }, [totalPages, page]);
 
+  /* KPI */
   const kpis = useMemo(() => {
     const base = { programmato: 0, svolto: 0, annullato: 0, recuperato: 0 };
     for (const r of filtered) base[r.stato] = (base[r.stato] || 0) + 1;
     const fatturabili = filtered.filter((r) => r.stato === "svolto").length;
-    const fatturati   = filtered.filter((r) => r.fatturato).length;
+    const fatturati = filtered.filter((r) => r.fatturato).length;
     return { ...base, fatturabili, fatturati, totale: filtered.length };
   }, [filtered]);
 
-  /* ───────────── CRUD helpers ───────────── */
-  function addEmptyRow() {
+  /* CRUD (DB) */
+  async function addEmptyRow() {
     const newRow = {
       id: generateId(),
       idContaq: "",
@@ -917,40 +1006,53 @@ export default function CofaceAppuntamentiDashboard() {
       fatturato: false,
       dataFatturazione: "",
     };
-    setRows((prev) => [newRow, ...prev]);
-    setEditing(newRow);
-  }
-
-  function updateRow(id, patch) { setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r))); }
-  function removeRow(id)        { setRows((prev) => prev.filter((r) => r.id !== id)); }
-  function markSvolto(r)        { updateRow(r.id, { stato: "svolto" }); }
-  function markAnnullato(r)     { updateRow(r.id, { stato: "annullato", dataAnnullamento: todayISO() }); }
-  function markRecupero(r)      { updateRow(r.id, { stato: "recuperato" }); }
-  function markFatturato(r)     { updateRow(r.id, { fatturato: true,  dataFatturazione: todayISO() }); }
-  function unmarkFatturato(r)   { updateRow(r.id, { fatturato: false, dataFatturazione: "" }); }
-
-  // Pulsante "Svuota tutto" con password
-  function clearAll() {
-    const pwd = prompt(
-      "ATTENZIONE: questa azione elimina TUTTI gli appuntamenti.\n\nInserisci la password per confermare:"
-    );
-    if (pwd !== CLEAR_ALL_PASSWORD) {
-      alert("Password errata. Operazione annullata.");
-      return;
+    const { error } = await supabase
+      .from("appointments")
+      .insert(rowToDb(newRow));
+    if (!error) {
+      setRows((p) => [newRow, ...p]);
+      setEditing(newRow);
     }
-    const ok = confirm(
-      "Confermi l'eliminazione DEFINITIVA di TUTTI gli appuntamenti?\nNon potrai annullare questa azione."
-    );
-    if (!ok) return;
-
-    setRows([]);
-    localStorage.removeItem(LS_KEY);
-    setEditing(null);
-    setPage(1);
-    alert("Tutti gli appuntamenti sono stati eliminati.");
+  }
+  async function updateRow(id, patch) {
+    const { error } = await supabase
+      .from("appointments")
+      .update(rowToDb(patch))
+      .eq("id", id);
+    if (!error) setRows((p) => p.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  }
+  async function removeRow(id) {
+    const { error } = await supabase.from("appointments").delete().eq("id", id);
+    if (!error) setRows((p) => p.filter((r) => r.id !== id));
+  }
+  function markSvolto(r) {
+    updateRow(r.id, { stato: "svolto" });
+  }
+  function markAnnullato(r) {
+    updateRow(r.id, { stato: "annullato", dataAnnullamento: todayISO() });
+  }
+  function markRecupero(r) {
+    updateRow(r.id, { stato: "recuperato" });
+  }
+  function markFatturato(r) {
+    updateRow(r.id, { fatturato: true, dataFatturazione: todayISO() });
+  }
+  function unmarkFatturato(r) {
+    updateRow(r.id, { fatturato: false, dataFatturazione: "" });
   }
 
-  /* ───────────── Excel Import/Export ───────────── */
+  async function clearAll() {
+    const pwd = prompt(
+      "ATTENZIONE: eliminerai TUTTI gli appuntamenti.\nInserisci la password per confermare:"
+    );
+    if (pwd !== CLEAR_ALL_PASSWORD)
+      return alert("Password errata. Operazione annullata.");
+    if (!confirm("Confermi l'eliminazione definitiva?")) return;
+    const { error } = await supabase.from("appointments").delete().neq("id", "");
+    if (!error) setRows([]);
+  }
+
+  /* Import/Export */
   function downloadTemplate() {
     const wb = XLSX.utils.book_new();
     const sample = [
@@ -964,7 +1066,7 @@ export default function CofaceAppuntamentiDashboard() {
         Azienda: "ACME S.p.A.",
         Referente: "Mario Rossi",
         Telefono: "021234567",
-        Email: "mario.rossi@example.com",
+        Email: "mario@example.com",
         "Città": "Milano",
         Provincia: "MI",
         Agente: "Bianchi",
@@ -982,12 +1084,12 @@ export default function CofaceAppuntamentiDashboard() {
     XLSX.utils.book_append_sheet(wb, ws, "Appuntamenti");
     XLSX.writeFile(wb, "template_appuntamenti.xlsx");
   }
-
   function importExcel(file) {
     const reader = new FileReader();
-    reader.onload = (e) => {
-      const data = new Uint8Array(e.target.result);
-      const wb = XLSX.read(data, { type: "array" });
+    reader.onload = async (e) => {
+      // ⬇️ Nomi diversi per evitare conflitti
+      const arr = new Uint8Array(e.target.result);
+      const wb = XLSX.read(arr, { type: "array" });
       const ws = wb.Sheets[wb.SheetNames[0]];
       const json = XLSX.utils.sheet_to_json(ws, { defval: "" });
 
@@ -997,13 +1099,21 @@ export default function CofaceAppuntamentiDashboard() {
           .trim()
           .replace(/\s+/g, "_");
         if (statoRaw === "da_recuperare") statoRaw = "recuperato";
-        const allowed = ["programmato", "svolto", "annullato", "recuperato"];
+        const allowed = [
+          "programmato",
+          "svolto",
+          "annullato",
+          "recuperato",
+        ];
         const stato = allowed.includes(statoRaw) ? statoRaw : "programmato";
+        const fatturatoRaw = String(r["Fatturato"] || "")
+          .toLowerCase()
+          .trim();
+        const fatturato = ["si", "sì", "true", "1", "x", "yes"].includes(
+          fatturatoRaw
+        );
 
-        const fatturatoRaw = String(r["Fatturato"] || "").toLowerCase().trim();
-        const fatturato = ["si", "sì", "true", "1", "x", "yes"].includes(fatturatoRaw);
-
-        return {
+        const obj = {
           id: r["ID"] || generateId(),
           idContaq: r["ID Contaq"] || "",
           dataInserimento: parseExcelDate(r["Data Inserimento"]) || todayISO(),
@@ -1025,12 +1135,17 @@ export default function CofaceAppuntamentiDashboard() {
           fatturato,
           dataFatturazione: parseExcelDate(r["Data Fatturazione"]) || "",
         };
+        return rowToDb(obj);
       });
-      setRows((prev) => [...mapped, ...prev]);
+
+      await supabase.from("appointments").upsert(mapped, { onConflict: "id" });
+      const { data: dbRows } = await supabase
+        .from("appointments")
+        .select("*");
+      setRows((dbRows || []).map(rowFromDb));
     };
     reader.readAsArrayBuffer(file);
   }
-
   function exportExcel(currentOnly = false) {
     const data = (currentOnly ? filtered : rows).map((r) => ({
       ID: r.id,
@@ -1055,14 +1170,14 @@ export default function CofaceAppuntamentiDashboard() {
       Fatturato: r.fatturato ? "Sì" : "No",
       "Data Fatturazione": r.dataFatturazione || "",
     }));
-
     const ws = XLSX.utils.json_to_sheet(data, { header: DEFAULT_HEADERS });
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Appuntamenti");
-    XLSX.writeFile(wb, `export_appuntamenti_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.writeFile(
+      wb,
+      `export_appuntamenti_${new Date().toISOString().slice(0, 10)}.xlsx`
+    );
   }
-
-  // CSV per amministrazione: solo “Svolto” NON fatturati
   function exportCSVFatturazione() {
     const header = [
       "ID",
@@ -1079,7 +1194,6 @@ export default function CofaceAppuntamentiDashboard() {
       "Provincia",
       "Fatturabile",
     ].join(",");
-
     const lines = filtered
       .filter((r) => r.stato === "svolto" && !r.fatturato)
       .map((r) =>
@@ -1101,7 +1215,6 @@ export default function CofaceAppuntamentiDashboard() {
           .map(csvSafe)
           .join(",")
       );
-
     const blob = new Blob([header + "\n" + lines.join("\n")], {
       type: "text/csv;charset=utf-8;",
     });
@@ -1112,8 +1225,6 @@ export default function CofaceAppuntamentiDashboard() {
     a.click();
     URL.revokeObjectURL(url);
   }
-
-  // EXCEL per fatturazione: “Svolto” NON fatturati
   function exportExcelFatturazione() {
     const data = filtered
       .filter((r) => r.stato === "svolto" && !r.fatturato)
@@ -1134,18 +1245,30 @@ export default function CofaceAppuntamentiDashboard() {
       }));
     const ws = XLSX.utils.json_to_sheet(data, {
       header: [
-        "ID", "ID Contaq", "Data Inserimento", "Ora Inserimento",
-        "Data Appuntamento", "Ora Appuntamento",
-        "Azienda", "Referente", "Agente", "Operatore",
-        "Cliente", "Provincia", "Fatturabile",
+        "ID",
+        "ID Contaq",
+        "Data Inserimento",
+        "Ora Inserimento",
+        "Data Appuntamento",
+        "Ora Appuntamento",
+        "Azienda",
+        "Referente",
+        "Agente",
+        "Operatore",
+        "Cliente",
+        "Provincia",
+        "Fatturabile",
       ],
     });
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Fatturazione");
-    XLSX.writeFile(wb, `fatturazione_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.writeFile(
+      wb,
+      `fatturazione_${new Date().toISOString().slice(0, 10)}.xlsx`
+    );
   }
 
-  /* ───────────────────────────── UI: 3 RIGHE ───────────────────────────── */
+  /* UI helpers */
   function KPI() {
     const chip = (label, value) => (
       <div className="rounded-2xl border px-4 py-2 text-sm bg-white shadow-sm">
@@ -1165,7 +1288,6 @@ export default function CofaceAppuntamentiDashboard() {
       </div>
     );
   }
-
   function Row({ r }) {
     const statusBadge =
       {
@@ -1174,25 +1296,21 @@ export default function CofaceAppuntamentiDashboard() {
         annullato: "bg-red-50 text-red-700 border-red-200",
         recuperato: "bg-amber-50 text-amber-700 border-amber-200",
       }[r.stato] || "";
-
     return (
       <tr className="border-b hover:bg-gray-50">
         <td className="p-2 font-mono text-xs opacity-60">{r.id}</td>
-
-        {/* Inserimento */}
         <td className="p-2 whitespace-nowrap">
           {fmtDate(r.dataInserimento)}
           <div className="text-xs opacity-60">{r.oraInserimento}</div>
         </td>
-
-        {/* Appuntamento */}
         <td className="p-2 whitespace-nowrap">
           {fmtDate(r.data)}
           <div className="text-xs opacity-60">{r.ora}</div>
         </td>
-
         <td className="p-2">
-          <div className="font-medium">{r.azienda || <span className="opacity-50">—</span>}</div>
+          <div className="font-medium">
+            {r.azienda || <span className="opacity-50">—</span>}
+          </div>
           <div className="text-xs opacity-60">{r.referente || ""}</div>
         </td>
         <td className="p-2">
@@ -1207,7 +1325,9 @@ export default function CofaceAppuntamentiDashboard() {
             {STATUSES.find((s) => s.value === r.stato)?.label}
           </span>
           {r.stato === "annullato" && r.dataAnnullamento && (
-            <div className="text-xs opacity-60 mt-1">Annullato il {fmtDate(r.dataAnnullamento)}</div>
+            <div className="text-xs opacity-60 mt-1">
+              Annullato il {fmtDate(r.dataAnnullamento)}
+            </div>
           )}
           {r.fatturato && (
             <div className="text-[11px] mt-1 px-2 py-0.5 rounded-full border bg-gray-50">
@@ -1215,30 +1335,74 @@ export default function CofaceAppuntamentiDashboard() {
             </div>
           )}
         </td>
-        <td className="p-2 max-w-[260px] truncate" title={r.note}>{r.note}</td>
+        <td className="p-2 max-w-[260px] truncate" title={r.note}>
+          {r.note}
+        </td>
         <td className="p-2">
           <div className="flex gap-1">
-            <Button variant="secondary" size="icon" className="h-8 w-8" onClick={() => setEditing(r)} title="Modifica">
+            <Button
+              variant="secondary"
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => setEditing(r)}
+              title="Modifica"
+            >
               <Pencil className="h-4 w-4" />
             </Button>
-            <Button variant="outline"   size="icon" className="h-8 w-8" onClick={() => markSvolto(r)}   title="Segna svolto" disabled={r.fatturato}><Check className="h-4 w-4" /></Button>
-            <Button variant="outline"   size="icon" className="h-8 w-8" onClick={() => markAnnullato(r)} title="Annulla"      disabled={r.fatturato}><X className="h-4 w-4" /></Button>
-            <Button variant="outline"   size="icon" className="h-8 w-8" onClick={() => markRecupero(r)}  title="Segna recuperato" disabled={r.fatturato}><RotateCcw className="h-4 w-4" /></Button>
-            <Button variant="ghost"     size="icon" className="h-8 w-8" onClick={() => removeRow(r.id)}  title="Elimina"       disabled={r.fatturato}><Trash2 className="h-4 w-4" /></Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => markSvolto(r)}
+              title="Segna svolto"
+              disabled={r.fatturato}
+            >
+              <Check className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => markAnnullato(r)}
+              title="Annulla"
+              disabled={r.fatturato}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => markRecupero(r)}
+              title="Recuperato"
+              disabled={r.fatturato}
+            >
+              <RotateCcw className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => removeRow(r.id)}
+              title="Elimina"
+              disabled={r.fatturato}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
           </div>
         </td>
       </tr>
     );
   }
 
-  /* ───────────────────────────── Render principale ───────────────────────────── */
+  /* Render */
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Coface – Gestione Appuntamenti</h1>
       </div>
 
-      {/* RIGA 1 — CERCA & FILTRI */}
+      {/* RIGA 1 – CERCA & FILTRI */}
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2">
@@ -1248,19 +1412,29 @@ export default function CofaceAppuntamentiDashboard() {
         </CardHeader>
         <CardContent>
           <FiltersBar
-            q={q} setQ={setQ}
-            client={client} setClient={setClient} clients={clients}
-            agent={agent} setAgent={setAgent} agents={agents}
-            creator={creator} setCreator={setCreator} creators={creators}
-            status={status} setStatus={setStatus}
-            month={month} setMonth={setMonth}
-            day={day} setDay={setDay}
+            q={q}
+            setQ={setQ}
+            client={client}
+            setClient={setClient}
+            clients={clients}
+            agent={agent}
+            setAgent={setAgent}
+            agents={agents}
+            creator={creator}
+            setCreator={setCreator}
+            creators={creators}
+            status={status}
+            setStatus={setStatus}
+            month={month}
+            setMonth={setMonth}
+            day={day}
+            setDay={setDay}
             setPage={setPage}
           />
         </CardContent>
       </Card>
 
-      {/* RIGA 2 — IMPORT & EXPORT */}
+      {/* RIGA 2 – IMPORT & EXPORT */}
       <Card>
         <CardHeader className="pb-2">
           <CardTitle>Import & Export</CardTitle>
@@ -1279,7 +1453,7 @@ export default function CofaceAppuntamentiDashboard() {
         </CardContent>
       </Card>
 
-      {/* RIGA 3 — NUMERI (KPI) */}
+      {/* RIGA 3 – KPI */}
       <Card>
         <CardHeader className="pb-2">
           <CardTitle>Numeri</CardTitle>
@@ -1289,7 +1463,7 @@ export default function CofaceAppuntamentiDashboard() {
         </CardContent>
       </Card>
 
-      {/* STATISTICHE PER OPERATORE (senza dipendenze) */}
+      {/* STATISTICHE PER OPERATORE */}
       <OperatorStatsCard
         rowsAll={rows}
         rowsFiltered={filtered}
@@ -1302,27 +1476,34 @@ export default function CofaceAppuntamentiDashboard() {
           <CardTitle>Elenco appuntamenti</CardTitle>
         </CardHeader>
         <CardContent>
-          {/* Ordina per */}
           <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
             <div className="flex items-center gap-2">
               <Label className="whitespace-nowrap">Ordina per</Label>
-
               <Select
                 value={sortBy}
-                onValueChange={(v) => { setSortBy(v); setPage(1); }}
+                onValueChange={(v) => {
+                  setSortBy(v);
+                  setPage(1);
+                }}
               >
                 <SelectTrigger className="w-[220px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="inserimento">Inserimento (data/ora)</SelectItem>
-                  <SelectItem value="appuntamento">Appuntamento (data/ora)</SelectItem>
+                  <SelectItem value="inserimento">
+                    Inserimento (data/ora)
+                  </SelectItem>
+                  <SelectItem value="appuntamento">
+                    Appuntamento (data/ora)
+                  </SelectItem>
                 </SelectContent>
               </Select>
-
               <Select
                 value={sortDir}
-                onValueChange={(v) => { setSortDir(v); setPage(1); }}
+                onValueChange={(v) => {
+                  setSortDir(v);
+                  setPage(1);
+                }}
               >
                 <SelectTrigger className="w-[160px]">
                   <SelectValue />
@@ -1353,15 +1534,20 @@ export default function CofaceAppuntamentiDashboard() {
                 </tr>
               </thead>
               <tbody>
-                {pageRows.map((r) => (<Row key={r.id} r={r} />))}
+                {pageRows.map((r) => (
+                  <Row key={r.id} r={r} />
+                ))}
                 {pageRows.length === 0 && (
-                  <tr><td colSpan={11} className="p-6 text-center text-sm opacity-60">Nessun risultato</td></tr>
+                  <tr>
+                    <td colSpan={11} className="p-6 text-center text-sm opacity-60">
+                      Nessun risultato
+                    </td>
+                  </tr>
                 )}
               </tbody>
             </table>
           </div>
 
-          {/* Paginazione */}
           <div className="flex items-center justify-between mt-4">
             <div className="text-sm opacity-70">
               {filtered.length} risultati • Pagina {page} di {totalPages}
@@ -1376,10 +1562,18 @@ export default function CofaceAppuntamentiDashboard() {
                 onChange={(e) => setPageSize(Number(e.target.value || 25))}
                 className="w-[90px]"
               />
-              <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
                 Precedente
               </Button>
-              <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
                 Successiva
               </Button>
             </div>
@@ -1388,7 +1582,8 @@ export default function CofaceAppuntamentiDashboard() {
       </Card>
 
       <p className="text-xs opacity-60">
-        Nessuna libreria grafica necessaria. Ordinamento cronologico stabile. Import/Export Excel, Excel/CSV fatturazione, stato “Recuperato” e cancellazione protetta inclusi.
+        Dati condivisi tramite Supabase (Postgres + Realtime). Import/Export Excel,
+        CSV/Excel fatturazione, stato “Recuperato” e cancellazione protetta inclusi.
       </p>
 
       <Editor
@@ -1400,7 +1595,7 @@ export default function CofaceAppuntamentiDashboard() {
         markRecupero={markRecupero}
         markFatturato={markFatturato}
         unmarkFatturato={unmarkFatturato}
-        clientiOpzioni={clients.slice(1)} // senza "tutti"
+        clientiOpzioni={clients.slice(1)}
       />
     </div>
   );
