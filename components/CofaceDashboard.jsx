@@ -1376,6 +1376,7 @@ export default function CofaceAppuntamentiDashboard() {
     <div className="p-6 max-w-7xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Coface – Gestione Appuntamenti</h1>
+        <LogoutButton />
       </div>
 
       {/* RIGA 1 – CERCA & FILTRI */}
