@@ -13,6 +13,7 @@ export default function LoginPage() {
   const [pwd, setPwd] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Se già loggato, vai alla home
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) router.replace("/");
@@ -46,14 +47,20 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center p-6">
       <div className="w-full max-w-sm space-y-4 border rounded-2xl p-6 shadow-sm bg-white">
         <h1 className="text-xl font-semibold">Accedi</h1>
+
         <div className="space-y-2">
           <Label>Email</Label>
           <Input value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
           <Label>Password</Label>
           <Input type="password" value={pwd} onChange={(e) => setPwd(e.target.value)} autoComplete="current-password" />
         </div>
-        <Button onClick={handleLogin} disabled={loading} className="w-full">Accedi</Button>
-        <Button onClick={handleMagic} variant="secondary" disabled={loading} className="w-full">Invia Magic Link</Button>
+
+        <Button onClick={handleLogin} disabled={loading} className="w-full">
+          Accedi
+        </Button>
+        <Button onClick={handleMagic} variant="secondary" disabled={loading} className="w-full">
+          Invia Magic Link
+        </Button>
       </div>
     </div>
   );
