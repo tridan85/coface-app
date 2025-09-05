@@ -1,36 +1,27 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import { Button } from "@/components/button";
 
-/**
- * LogoutButton
- * - variant: "default" | "secondary" | "outline" | "ghost" | ...
- * - size: "sm" | "md" | "lg" (se supportato dal tuo <Button>)
- * - className: classi Tailwind extra
- * - label: testo del bottone
- */
-export default function LogoutButton({
-  variant = "outline",
-  size = "sm",
-  className = "",
-  label = "Esci",
-}) {
+export default function LogoutButton({ className = "" }) {
   const router = useRouter();
+  const supabase = createClientComponentClient();
 
-  async function handleLogout() {
+  const handleLogout = async () => {
     const { error } = await supabase.auth.signOut();
     if (error) {
-      alert(error.message);
+      alert(`Logout error: ${error.message}`);
       return;
     }
     router.replace("/login");
-  }
+    // Se vuoi forzare un hard refresh usa:
+    // window.location.href = "/login";
+  };
 
   return (
-    <Button variant={variant} size={size} className={className} onClick={handleLogout}>
-      {label}
+    <Button onClick={handleLogout} variant="outline" className={className}>
+      Esci
     </Button>
   );
 }
