@@ -1,27 +1,36 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { createMiddlewareClient } from "@supabase/auth-helpers-nextjs";
 
-// Protegge tutto tranne statiche, /api e /login
+/**
+ * Protegge tutto tranne asset statici, /api e /login.
+ * Usa le auth-helpers per leggere/refreshare la sessione dai cookie,
+ * così gli accessi funzionano anche lato server.
+ */
 export const config = {
   matcher: ["/((?!_next|api|favicon.ico|images|fonts).*)"],
 };
 
-export function middleware(req: NextRequest) {
+export async function middleware(req: NextRequest) {
+  const res = NextResponse.next();
+  const supabase = createMiddlewareClient({ req, res });
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
   const url = req.nextUrl.clone();
 
-  const access = req.cookies.get("sb-access-token")?.value;
-  const refresh = req.cookies.get("sb-refresh-token")?.value;
-  const hasSession = Boolean(access && refresh);
-
-  if (!hasSession && url.pathname !== "/login") {
+  // Non loggato -> manda a /login
+  if (!session && url.pathname !== "/login") {
     url.pathname = "/login";
     return NextResponse.redirect(url);
   }
 
-  if (hasSession && url.pathname === "/login") {
+  // Già loggato ma su /login -> manda a home
+  if (session && url.pathname === "/login") {
     url.pathname = "/";
     return NextResponse.redirect(url);
   }
 
-  return NextResponse.next();
+  return res; // importante ritornare 'res' per mantenere i cookie aggiornati
 }
