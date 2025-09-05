@@ -4,7 +4,19 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { Button } from "@/components/button";
 
-export default function LogoutButton({ className = "" }) {
+/**
+ * LogoutButton
+ * - variant: "default" | "secondary" | "outline" | "ghost" | ...
+ * - size: "sm" | "md" | "lg" (se supportato dal tuo <Button>)
+ * - className: classi Tailwind extra
+ * - label: testo del bottone
+ */
+export default function LogoutButton({
+  variant = "outline",
+  size = "sm",
+  className = "",
+  label = "Esci",
+}) {
   const router = useRouter();
 
   async function handleLogout() {
@@ -17,8 +29,8 @@ export default function LogoutButton({ className = "" }) {
   }
 
   return (
-    <Button onClick={handleLogout} variant="outline" className={className}>
-      Esci
+    <Button variant={variant} size={size} className={className} onClick={handleLogout}>
+      {label}
     </Button>
   );
 }
