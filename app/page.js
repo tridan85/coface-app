@@ -1,10 +1,6 @@
 // app/page.js
-import CofaceAppuntamentiDashboard from "../components/CofaceDashboard";
+import CofaceAppuntamentiDashboard from "@/components/CofaceDashboard.jsx";
 
 export default function Page() {
-  return (
-    <main className="min-h-screen bg-gray-100">
-      <CofaceAppuntamentiDashboard />
-    </main>
-  );
+  return <CofaceAppuntamentiDashboard />;
 }

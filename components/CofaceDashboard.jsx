@@ -30,6 +30,9 @@ import {
 import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabaseClient";
 
+// ✅ Aggiunto: bottone Logout
+import LogoutButton from "@/components/LogoutButton";
+
 /* ╭──────────────────────────────────────────────────────────────╮
    │ Costanti / util                                              │
    ╰──────────────────────────────────────────────────────────────╯ */
@@ -435,7 +438,11 @@ function Editor({
                 variant="secondary"
                 onClick={() => {
                   unmarkFatturato(r);
-                  setEditing({ ...r, fatturato: false, dataFatturazione: "" });
+                  setEditing({
+                    ...r,
+                    fatturato: false,
+                    dataFatturazione: "",
+                  });
                 }}
                 className="gap-2"
               >
@@ -1373,6 +1380,8 @@ export default function CofaceAppuntamentiDashboard() {
     <div className="p-6 max-w-7xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Coface – Gestione Appuntamenti</h1>
+        {/* ✅ Bottone Esci */}
+        <LogoutButton />
       </div>
 
       {/* RIGA 1 – CERCA & FILTRI */}
