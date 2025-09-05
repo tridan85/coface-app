@@ -1,67 +1,121 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+
 import { Button } from "@/components/button";
 import { Input } from "@/components/input";
 import { Label } from "@/components/label";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/card";
 
 export default function LoginPage() {
   const router = useRouter();
+  const supabase = createClientComponentClient();
+
   const [email, setEmail] = useState("");
-  const [pwd, setPwd] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
 
-  // Se già loggato, vai alla home
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session) router.replace("/");
-    });
-  }, [router]);
-
-  async function handleLogin() {
+  async function onSubmit(e) {
+    e.preventDefault();
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password: pwd });
+    setMessage("");
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
     setLoading(false);
-    if (error) alert(error.message);
-    else router.replace("/");
+
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+    // login OK → vai in home
+    router.replace("/");
   }
 
-  async function handleMagic() {
-    if (!email) return alert("Inserisci l'email");
+  async function onMagicLink() {
     setLoading(true);
+    setMessage("");
+
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        emailRedirectTo:
-          typeof window !== "undefined" ? window.location.origin : "https://coface-app.vercel.app",
+        emailRedirectTo: `${window.location.origin}/`,
       },
     });
+
     setLoading(false);
-    if (error) alert(error.message);
-    else alert("Ti abbiamo inviato un link di accesso.");
+
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+    setMessage("Ti abbiamo inviato un link di accesso. Controlla la tua email.");
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-6">
-      <div className="w-full max-w-sm space-y-4 border rounded-2xl p-6 shadow-sm bg-white">
-        <h1 className="text-xl font-semibold">Accedi</h1>
+    <div className="min-h-screen w-full flex items-center justify-center p-6">
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <CardTitle>Accedi</CardTitle>
+        </CardHeader>
 
-        <div className="space-y-2">
-          <Label>Email</Label>
-          <Input value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
-          <Label>Password</Label>
-          <Input type="password" value={pwd} onChange={(e) => setPwd(e.target.value)} autoComplete="current-password" />
-        </div>
+        <CardContent>
+          <form onSubmit={onSubmit} className="space-y-4">
+            <div>
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </div>
 
-        <Button onClick={handleLogin} disabled={loading} className="w-full">
-          Accedi
-        </Button>
-        <Button onClick={handleMagic} variant="secondary" disabled={loading} className="w-full">
-          Invia Magic Link
-        </Button>
-      </div>
+            <div>
+              <Label htmlFor="password">Password</Label>
+              <Input
+                id="password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </div>
+
+            <Button type="submit" disabled={loading} className="w-full">
+              {loading ? "Accesso..." : "Accedi"}
+            </Button>
+          </form>
+
+          <div className="mt-4 space-y-2">
+            <Button
+              variant="secondary"
+              onClick={onMagicLink}
+              disabled={loading}
+              className="w-full"
+            >
+              Invia Magic Link
+            </Button>
+
+            {message && (
+              <p className="text-sm text-center mt-2">{message}</p>
+            )}
+
+            <p className="text-xs text-center opacity-60">
+              coface-app – accesso protetto
+            </p>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
