@@ -28,14 +28,14 @@ import {
   SelectValue,
 } from "@/components/select";
 import * as XLSX from "xlsx";
-import { supabase } from "@/lib/supabaseClient";
-
-// ✅ Aggiunto: bottone Logout
 import LogoutButton from "@/components/LogoutButton";
 
-/* ╭──────────────────────────────────────────────────────────────╮
-   │ Costanti / util                                              │
-   ╰──────────────────────────────────────────────────────────────╯ */
+// ⬇️ usa il client con sessione (singleton)
+import { getSupabaseClient } from "@/lib/supabaseClient";
+
+/* ────────────────────────────────────────────────────────────── */
+/* Costanti / util                                                */
+/* ────────────────────────────────────────────────────────────── */
 const STATUSES = [
   { value: "programmato", label: "Programmato" },
   { value: "svolto", label: "Svolto" },
@@ -63,8 +63,6 @@ function nowHM() {
   const mm = String(d.getMinutes()).padStart(2, "0");
   return `${hh}:${mm}`;
 }
-
-/* YYYY-MM-DD da Excel / stringhe varie */
 function parseExcelDate(v) {
   if (v == null || v === "") return "";
   if (typeof v === "number") return XLSX.SSF.format("yyyy-mm-dd", v);
@@ -82,7 +80,6 @@ function parseExcelDate(v) {
   if (!isNaN(+d)) return d.toISOString().slice(0, 10);
   return "";
 }
-/* HH:mm (gestisce 0.4166, 9:30, 9.5, ecc.) */
 function parseExcelTime(v) {
   const pad = (n) => String(n).padStart(2, "0");
   if (v == null || v === "") return "";
@@ -112,7 +109,6 @@ function parseExcelTime(v) {
   }
   return s || "";
 }
-/* timestamp da data/ora locale */
 function tsFrom(dateStr, timeStr) {
   if (!dateStr) return NaN;
   const m = String(dateStr).match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -169,7 +165,7 @@ function generateId() {
   ).toUpperCase();
 }
 
-/* mapping JS <-> DB (città -> citta) + ***FIX DATE "" -> NULL*** */
+/* mapping JS <-> DB */
 function rowFromDb(db) {
   return { ...db, città: db.citta ?? "" };
 }
@@ -211,9 +207,9 @@ const DEFAULT_HEADERS = [
   "Data Fatturazione",
 ];
 
-/* ╭──────────────────────────────────────────────────────────────╮
-   │ Editor (modale)                                              │
-   ╰──────────────────────────────────────────────────────────────╯ */
+/* ────────────────────────────────────────────────────────────── */
+/* Editor (modale)                                                */
+/* ────────────────────────────────────────────────────────────── */
 function Editor({
   editing,
   setEditing,
@@ -438,11 +434,7 @@ function Editor({
                 variant="secondary"
                 onClick={() => {
                   unmarkFatturato(r);
-                  setEditing({
-                    ...r,
-                    fatturato: false,
-                    dataFatturazione: "",
-                  });
+                  setEditing({ ...r, fatturato: false, dataFatturazione: "" });
                 }}
                 className="gap-2"
               >
@@ -456,9 +448,9 @@ function Editor({
   );
 }
 
-/* ╭──────────────────────────────────────────────────────────────╮
-   │ Barre comandi                                                │
-   ╰──────────────────────────────────────────────────────────────╯ */
+/* ────────────────────────────────────────────────────────────── */
+/* Barre comandi                                                  */
+/* ────────────────────────────────────────────────────────────── */
 function FiltersBar({
   q,
   setQ,
@@ -642,7 +634,11 @@ function ActionsBar({
           e.target.value = "";
         }}
       />
-      <Button variant="secondary" className="gap-2" onClick={downloadTemplate}>
+      <Button
+        variant="secondary"
+        className="gap-2"
+        onClick={downloadTemplate}
+      >
         <FileSpreadsheet className="h-4 w-4" />
         Template
       </Button>
@@ -674,9 +670,9 @@ function ActionsBar({
   );
 }
 
-/* ╭──────────────────────────────────────────────────────────────╮
-   │ “Grafici” CSS (niente dipendenze)                           │
-   ╰──────────────────────────────────────────────────────────────╯ */
+/* ────────────────────────────────────────────────────────────── */
+/* “Grafici” CSS (no lib)                                         */
+/* ────────────────────────────────────────────────────────────── */
 function BarChartCSS({ title, data, height = 220 }) {
   const max = Math.max(1, ...data.map((d) => d.value || 0));
   return (
@@ -715,10 +711,7 @@ function DonutCSS({ title, items }) {
         <div className="text-sm space-y-2">
           {items.map((x, i) => (
             <div key={i} className="flex items-center gap-2">
-              <span
-                className="inline-block w-3 h-3 rounded-sm"
-                style={{ background: x.color }}
-              />
+              <span className="inline-block w-3 h-3 rounded-sm" style={{ background: x.color }} />
               <span className="w-28">{x.name}</span>
               <span className="font-medium">{x.value}</span>
             </div>
@@ -729,14 +722,17 @@ function DonutCSS({ title, items }) {
   );
 }
 
-/* KPI per Operatore */
+/* KPI Operatore */
 function OperatorStatsCard({ rowsAll, rowsFiltered, creators }) {
   const [selectedOp, setSelectedOp] = React.useState("tutti");
   const [respectFilters, setRespectFilters] = React.useState(true);
 
   const base = respectFilters ? rowsFiltered : rowsAll;
   const dataRows = React.useMemo(
-    () => (selectedOp === "tutti" ? base : base.filter((r) => r.operatore === selectedOp)),
+    () =>
+      selectedOp === "tutti"
+        ? base
+        : base.filter((r) => r.operatore === selectedOp),
     [base, selectedOp]
   );
 
@@ -756,11 +752,7 @@ function OperatorStatsCard({ rowsAll, rowsFiltered, creators }) {
     [dataRows]
   );
   const byInsMonth = React.useMemo(
-    () =>
-      aggregateByMonth(dataRows, "dataInserimento").map((x) => ({
-        label: x.month,
-        value: x.count,
-      })),
+    () => aggregateByMonth(dataRows, "dataInserimento").map((x) => ({ label: x.month, value: x.count })),
     [dataRows]
   );
 
@@ -828,11 +820,12 @@ function OperatorStatsCard({ rowsAll, rowsFiltered, creators }) {
   );
 }
 
-/* ╭──────────────────────────────────────────────────────────────╮
-   │ Componente principale                                       │
-   ╰──────────────────────────────────────────────────────────────╯ */
+/* ────────────────────────────────────────────────────────────── */
+/* Componente principale                                          */
+/* ────────────────────────────────────────────────────────────── */
 export default function CofaceAppuntamentiDashboard() {
   const fileInputRef = useRef(null);
+  const supabase = getSupabaseClient();
 
   /* dati dal DB */
   const [rows, setRows] = useState([]);
@@ -851,20 +844,47 @@ export default function CofaceAppuntamentiDashboard() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
 
-  /* primo fetch */
+  /* primo fetch — con fallback REST se la select fallisce */
   useEffect(() => {
     (async () => {
-      const { data, error } = await supabase
+      const { data: sess } = await supabase.auth.getSession();
+      console.log("SESSION PROD:", !!sess?.session, sess?.session?.user?.email);
+
+      // ✅ Guard: se non c’è sessione, vai al login (copre la prod se il middleware non scatta)
+      if (!sess?.session) {
+        window.location.href = "/login";
+        return;
+      }
+
+      let { data, error } = await supabase
         .from("appointments")
         .select("*")
         .order("dataInserimento", { ascending: true })
         .order("oraInserimento", { ascending: true });
-      if (!error) setRows((data || []).map(rowFromDb));
-    })();
-  }, []);
 
-  /* realtime */
-  useEffect(() => {
+      if (error) {
+        console.warn("Supabase select failed:", error);
+
+        // Fallback REST manuale con Bearer esplicito
+        try {
+          const accessToken = sess?.session?.access_token || "";
+          const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/appointments?select=*&order=dataInserimento.asc&order=oraInserimento.asc`;
+          const r = await fetch(url, {
+            headers: {
+              apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+              Authorization: `Bearer ${accessToken}`,
+            },
+          });
+          console.log("Manual REST status:", r.status);
+          if (r.ok) data = await r.json();
+        } catch (e) {
+          console.error("Manual REST error:", e);
+        }
+      }
+
+      setRows((data || []).map(rowFromDb));
+    })();
+
     const ch = supabase
       .channel("realtime:appointments")
       .on(
@@ -876,28 +896,45 @@ export default function CofaceAppuntamentiDashboard() {
         }
       )
       .subscribe();
+
     return () => {
       supabase.removeChannel(ch);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* liste dinamiche */
   const agents = useMemo(
     () =>
-      ["tutti", ...Array.from(new Set(rows.map((r) => r.agente).filter(Boolean))).sort((a, b) => a.localeCompare(b))],
+      [
+        "tutti",
+        ...Array.from(
+          new Set(rows.map((r) => r.agente).filter(Boolean))
+        ).sort((a, b) => a.localeCompare(b)),
+      ],
     [rows]
   );
   const creators = useMemo(
     () =>
-      ["tutti", ...Array.from(new Set(rows.map((r) => r.operatore).filter(Boolean))).sort((a, b) => a.localeCompare(b))],
+      [
+        "tutti",
+        ...Array.from(
+          new Set(rows.map((r) => r.operatore).filter(Boolean))
+        ).sort((a, b) => a.localeCompare(b)),
+      ],
     [rows]
   );
   const clients = useMemo(
-    () => ["tutti", ...Array.from(new Set([...CLIENTI_CANONICI, ...rows.map((r) => r.cliente).filter(Boolean)]))],
+    () => [
+      "tutti",
+      ...Array.from(
+        new Set([...CLIENTI_CANONICI, ...rows.map((r) => r.cliente).filter(Boolean)])
+      ),
+    ],
     [rows]
   );
 
-  /* filtra + ordina in modo robusto */
+  /* filtra + ordina */
   const filtered = useMemo(() => {
     let out = rows;
     if (agent !== "tutti") out = out.filter((r) => r.agente === agent);
@@ -954,11 +991,21 @@ export default function CofaceAppuntamentiDashboard() {
 
   /* KPI */
   const kpis = useMemo(() => {
-    const base = { programmato: 0, svolto: 0, annullato: 0, recuperato: 0 };
+    const base = {
+      programmato: 0,
+      svolto: 0,
+      annullato: 0,
+      recuperato: 0,
+    };
     for (const r of filtered) base[r.stato] = (base[r.stato] || 0) + 1;
     const fatturabili = filtered.filter((r) => r.stato === "svolto").length;
     const fatturati = filtered.filter((r) => r.fatturato).length;
-    return { ...base, fatturabili, fatturati, totale: filtered.length };
+    return {
+      ...base,
+      fatturabili,
+      fatturati,
+      totale: filtered.length,
+    };
   }, [filtered]);
 
   /* CRUD (DB) */
@@ -981,29 +1028,47 @@ export default function CofaceAppuntamentiDashboard() {
       operatore: "",
       cliente: "",
       stato: "programmato",
-      dataAnnullamento: null, // *** NULL ***
+      dataAnnullamento: null,
       note: "",
       fatturato: false,
-      dataFatturazione: null, // *** NULL ***
+      dataFatturazione: null,
     };
     const { error } = await supabase
       .from("appointments")
       .insert(rowToDb(newRow));
-    if (!error) {
-      setRows((p) => [newRow, ...p]);
-      setEditing(newRow);
+
+    if (error) {
+      console.error("Insert error:", error);
+      alert(`Errore creazione: ${error.message}`);
+      return;
     }
+    setRows((p) => [newRow, ...p]);
+    setEditing(newRow);
   }
+
   async function updateRow(id, patch) {
     const { error } = await supabase
       .from("appointments")
       .update(rowToDb(patch))
       .eq("id", id);
-    if (!error) setRows((p) => p.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+    if (error) {
+      console.error("Update error:", error);
+      alert(`Errore salvataggio: ${error.message}`);
+      return;
+    }
+    setRows((p) => p.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   }
   async function removeRow(id) {
-    const { error } = await supabase.from("appointments").delete().eq("id", id);
-    if (!error) setRows((p) => p.filter((r) => r.id !== id));
+    const { error } = await supabase
+      .from("appointments")
+      .delete()
+      .eq("id", id);
+    if (error) {
+      console.error("Delete error:", error);
+      alert(`Errore eliminazione: ${error.message}`);
+      return;
+    }
+    setRows((p) => p.filter((r) => r.id !== id));
   }
   function markSvolto(r) {
     updateRow(r.id, { stato: "svolto" });
@@ -1029,7 +1094,12 @@ export default function CofaceAppuntamentiDashboard() {
       return alert("Password errata. Operazione annullata.");
     if (!confirm("Confermi l'eliminazione definitiva?")) return;
     const { error } = await supabase.from("appointments").delete().neq("id", "");
-    if (!error) setRows([]);
+    if (error) {
+      console.error("Clear all error:", error);
+      alert(`Errore eliminazione: ${error.message}`);
+      return;
+    }
+    setRows([]);
   }
 
   /* Import/Export */
@@ -1091,10 +1161,8 @@ export default function CofaceAppuntamentiDashboard() {
           id: r["ID"] || generateId(),
           idContaq: r["ID Contaq"] || "",
           dataInserimento: parseExcelDate(r["Data Inserimento"]) || todayISO(),
-          oraInserimento:
-            parseExcelTime(r["Ora Inserimento"]) || nowHM(),
+          oraInserimento: parseExcelTime(r["Ora Inserimento"]) || nowHM(),
 
-          // *** se vuote -> NULL ***
           data: parseExcelDate(r["Data Appuntamento"]) || null,
           ora: parseExcelTime(r["Ora Appuntamento"]) || "",
 
@@ -1108,10 +1176,10 @@ export default function CofaceAppuntamentiDashboard() {
           operatore: r["Operatore"] || "",
           cliente: r["Cliente"] || "",
           stato,
-          dataAnnullamento: parseExcelDate(r["Data Annullamento"]) || null, // ***
+          dataAnnullamento: parseExcelDate(r["Data Annullamento"]) || null,
           note: r["Note"] || "",
           fatturato,
-          dataFatturazione: parseExcelDate(r["Data Fatturazione"]) || null, // ***
+          dataFatturazione: parseExcelDate(r["Data Fatturazione"]) || null,
         };
         return rowToDb(obj);
       });
@@ -1297,9 +1365,13 @@ export default function CofaceAppuntamentiDashboard() {
           <div>{r.città}</div>
           <div className="text-xs opacity-60">{r.provincia}</div>
         </td>
-        <td className="p-2">{r.cliente || <span className="opacity-50">—</span>}</td>
+        <td className="p-2">
+          {r.cliente || <span className="opacity-50">—</span>}
+        </td>
         <td className="p-2">{r.agente}</td>
-        <td className="p-2">{r.operatore || <span className="opacity-50">—</span>}</td>
+        <td className="p-2">
+          {r.operatore || <span className="opacity-50">—</span>}
+        </td>
         <td className="p-2">
           <span className={`text-xs px-2 py-1 rounded-full border ${statusBadge}`}>
             {STATUSES.find((s) => s.value === r.stato)?.label}
@@ -1311,7 +1383,8 @@ export default function CofaceAppuntamentiDashboard() {
           )}
           {r.fatturato && (
             <div className="text-[11px] mt-1 px-2 py-0.5 rounded-full border bg-gray-50">
-              Fatturato {r.dataFatturazione ? `(${fmtDate(r.dataFatturazione)})` : ""}
+              Fatturato{" "}
+              {r.dataFatturazione ? `(${fmtDate(r.dataFatturazione)})` : ""}
             </div>
           )}
         </td>
@@ -1380,7 +1453,6 @@ export default function CofaceAppuntamentiDashboard() {
     <div className="p-6 max-w-7xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Coface – Gestione Appuntamenti</h1>
-        {/* ✅ Bottone Esci */}
         <LogoutButton />
       </div>
 
@@ -1441,7 +1513,36 @@ export default function CofaceAppuntamentiDashboard() {
           <CardTitle>Numeri</CardTitle>
         </CardHeader>
         <CardContent>
-          <KPI />
+          <div className="flex flex-wrap gap-3">
+            <div className="rounded-2xl border px-4 py-2 text-sm bg-white shadow-sm">
+              <span className="opacity-60 mr-2">Totale</span>
+              <span className="font-semibold">{kpis.totale}</span>
+            </div>
+            <div className="rounded-2xl border px-4 py-2 text-sm bg-white shadow-sm">
+              <span className="opacity-60 mr-2">Programmato</span>
+              <span className="font-semibold">{kpis.programmato}</span>
+            </div>
+            <div className="rounded-2xl border px-4 py-2 text-sm bg-white shadow-sm">
+              <span className="opacity-60 mr-2">Svolto</span>
+              <span className="font-semibold">{kpis.svolto}</span>
+            </div>
+            <div className="rounded-2xl border px-4 py-2 text-sm bg-white shadow-sm">
+              <span className="opacity-60 mr-2">Annullato</span>
+              <span className="font-semibold">{kpis.annullato}</span>
+            </div>
+            <div className="rounded-2xl border px-4 py-2 text-sm bg-white shadow-sm">
+              <span className="opacity-60 mr-2">Recuperato</span>
+              <span className="font-semibold">{kpis.recuperato}</span>
+            </div>
+            <div className="rounded-2xl border px-4 py-2 text-sm bg-white shadow-sm">
+              <span className="opacity-60 mr-2">Fatturabili</span>
+              <span className="font-semibold">{kpis.fatturabili}</span>
+            </div>
+            <div className="rounded-2xl border px-4 py-2 text-sm bg-white shadow-sm">
+              <span className="opacity-60 mr-2">Fatturati</span>
+              <span className="font-semibold">{kpis.fatturati}</span>
+            </div>
+          </div>
         </CardContent>
       </Card>
 
@@ -1521,7 +1622,10 @@ export default function CofaceAppuntamentiDashboard() {
                 ))}
                 {pageRows.length === 0 && (
                   <tr>
-                    <td colSpan={11} className="p-6 text-center text-sm opacity-60">
+                    <td
+                      colSpan={11}
+                      className="p-6 text-center text-sm opacity-60"
+                    >
                       Nessun risultato
                     </td>
                   </tr>
@@ -1541,9 +1645,7 @@ export default function CofaceAppuntamentiDashboard() {
                 min={1}
                 max={200}
                 value={pageSize}
-                onChange={(e) =>
-                  setPageSize(Number(e.target.value || 25))
-                }
+                onChange={(e) => setPageSize(Number(e.target.value || 25))}
                 className="w-[90px]"
               />
               <Button
@@ -1566,8 +1668,9 @@ export default function CofaceAppuntamentiDashboard() {
       </Card>
 
       <p className="text-xs opacity-60">
-        Dati condivisi tramite Supabase (Postgres + Realtime). Import/Export Excel, CSV/Excel
-        fatturazione, stato “Recuperato” e cancellazione protetta inclusi.
+        Dati condivisi tramite Supabase (Postgres + Realtime). Import/Export
+        Excel, CSV/Excel fatturazione, stato “Recuperato” e cancellazione
+        protetta inclusi.
       </p>
 
       <Editor

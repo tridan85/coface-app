@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState } from "react";
-import { useRouter } from "next/navigation";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
 import { Button } from "@/components/button";
@@ -10,7 +9,6 @@ import { Label } from "@/components/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/card";
 
 export default function LoginPage() {
-  const router = useRouter();
   const supabase = createClientComponentClient();
 
   const [email, setEmail] = useState("");
@@ -18,6 +16,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
+  // Login con email+password
   async function onSubmit(e) {
     e.preventDefault();
     setLoading(true);
@@ -34,10 +33,13 @@ export default function LoginPage() {
       setMessage(error.message);
       return;
     }
-    // login OK → vai in home
-    router.replace("/");
+
+    // 🔧 IMPORTANTE in produzione: hard reload per far passare dal middleware
+    // e sincronizzare i cookie di sessione (sb-access-token/sb-refresh-token).
+    window.location.href = "/";
   }
 
+  // Login con Magic Link
   async function onMagicLink() {
     setLoading(true);
     setMessage("");
@@ -45,7 +47,9 @@ export default function LoginPage() {
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        emailRedirectTo: `${window.location.origin}/`,
+        // reindirizza all'origine corrente (localhost in dev, vercel in prod)
+        emailRedirectTo:
+          typeof window !== "undefined" ? `${window.location.origin}/` : undefined,
       },
     });
 
@@ -100,15 +104,13 @@ export default function LoginPage() {
             <Button
               variant="secondary"
               onClick={onMagicLink}
-              disabled={loading}
+              disabled={loading || !email}
               className="w-full"
             >
               Invia Magic Link
             </Button>
 
-            {message && (
-              <p className="text-sm text-center mt-2">{message}</p>
-            )}
+            {message && <p className="text-sm text-center mt-2">{message}</p>}
 
             <p className="text-xs text-center opacity-60">
               coface-app – accesso protetto
