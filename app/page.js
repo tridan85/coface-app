@@ -1,5 +1,5 @@
-// app/page.js
-import CofaceAppuntamentiDashboard from "@/components/CofaceDashboard.jsx";
+// app/page.jsx
+import CofaceAppuntamentiDashboard from "@/components/CofaceDashboard";
 
 export default function Page() {
   return <CofaceAppuntamentiDashboard />;
