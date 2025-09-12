@@ -208,12 +208,12 @@ const DEFAULT_HEADERS = [
 ];
 
 /* ─────────────────────────────────────────────────────────── */
-/* Editor (modale) – usa update/mark “protetti” da password    */
+/* Editor (modale)                                             */
 /* ─────────────────────────────────────────────────────────── */
 function Editor({
   editing,
   setEditing,
-  updateRow,         // ⬅️ già protetto da password
+  updateRow,
   markSvolto,
   markAnnullato,
   markRecupero,
@@ -475,10 +475,14 @@ function FiltersBar({
   setMonth,
   day,
   setDay,
+  monthIns,
+  setMonthIns,
+  dayIns,
+  setDayIns,
   setPage,
 }) {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-3">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-9 gap-3">
       <div className="sm:col-span-2">
         <Label>Cerca</Label>
         <div className="relative">
@@ -601,6 +605,28 @@ function FiltersBar({
           }}
         />
       </div>
+      <div>
+        <Label>Mese (inserimento)</Label>
+        <Input
+          type="month"
+          value={monthIns}
+          onChange={(e) => {
+            setMonthIns(e.target.value);
+            setPage(1);
+          }}
+        />
+      </div>
+      <div>
+        <Label>Giorno (inserimento)</Label>
+        <Input
+          type="date"
+          value={dayIns}
+          onChange={(e) => {
+            setDayIns(e.target.value);
+            setPage(1);
+          }}
+        />
+      </div>
     </div>
   );
 }
@@ -674,9 +700,8 @@ function ActionsBar({
     </div>
   );
 }
-
 /* ────────────────────────────────────────────────────────────── */
-/* “Grafici” CSS (no lib)                                         */
+/* “Grafici” CSS (no librerie)                                   */
 /* ────────────────────────────────────────────────────────────── */
 function BarChartCSS({ title, data, height = 220 }) {
   const max = Math.max(1, ...data.map((d) => d.value || 0));
@@ -698,16 +723,18 @@ function BarChartCSS({ title, data, height = 220 }) {
     </div>
   );
 }
+
 function DonutCSS({ title, items }) {
-  const total = items.reduce((s, x) => s + x.value, 0);
+  const total = items.reduce((s, x) => s + (x.value || 0), 0);
   let acc = 0;
   const segments = items.map((x) => {
     const start = (acc / (total || 1)) * 360;
-    acc += x.value;
+    acc += x.value || 0;
     const end = (acc / (total || 1)) * 360;
     return `${x.color} ${start}deg ${end}deg`;
   });
   const gradient = `conic-gradient(${segments.join(", ")})`;
+
   return (
     <div className="border rounded-xl p-3">
       <div className="text-sm font-medium mb-2">{title}</div>
@@ -823,22 +850,110 @@ function OperatorStatsCard({ rowsAll, rowsFiltered, creators }) {
 }
 
 /* ────────────────────────────────────────────────────────────── */
+/* Nuova card: Statistiche per giorno di inserimento              */
+/* ────────────────────────────────────────────────────────────── */
+function InsertionStatsCard({ rows }) {
+  // prendi gli ultimi 30 giorni PRESENTI (date distinte su dataInserimento)
+  const last30Dates = React.useMemo(() => {
+    const set = new Set(
+      rows
+        .map((r) => r.dataInserimento)
+        .filter((d) => d && /^\d{4}-\d{2}-\d{2}$/.test(d))
+        .sort((a, b) => a.localeCompare(b))
+    );
+    const arr = Array.from(set);
+    return arr.slice(-30);
+  }, [rows]);
+
+  const byDay = React.useMemo(() => {
+    const map = new Map();
+    for (const r of rows) {
+      const d = r.dataInserimento;
+      if (!d || !last30Dates.includes(d)) continue;
+      map.set(d, (map.get(d) || 0) + 1);
+    }
+    // ordina per data crescente e poi mappa in {label,value}
+    return last30Dates.map((d) => ({
+      label: d.split("-").reverse().join("/"),
+      value: map.get(d) || 0,
+    }));
+  }, [rows, last30Dates]);
+
+  const byOperatore = React.useMemo(() => {
+    const map = new Map();
+    for (const r of rows) {
+      if (!r.dataInserimento || !last30Dates.includes(r.dataInserimento)) continue;
+      map.set(r.operatore || "—", (map.get(r.operatore || "—") || 0) + 1);
+    }
+    return Array.from(map.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+  }, [rows, last30Dates]);
+
+  const byCliente = React.useMemo(() => {
+    const map = new Map();
+    for (const r of rows) {
+      if (!r.dataInserimento || !last30Dates.includes(r.dataInserimento)) continue;
+      map.set(r.cliente || "—", (map.get(r.cliente || "—") || 0) + 1);
+    }
+    return Array.from(map.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+  }, [rows, last30Dates]);
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle>Statistiche per giorno di inserimento (ultimi 30 giorni presenti)</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <BarChartCSS title="Totale per giorno (inserimento)" data={byDay} />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="border rounded-xl p-3">
+            <div className="text-sm font-medium mb-2">Per operatore</div>
+            <div className="space-y-1 max-h-[260px] overflow-auto pr-2">
+              {byOperatore.map((x) => (
+                <div key={x.name} className="flex items-center justify-between text-sm">
+                  <span className="truncate">{x.name}</span>
+                  <span className="font-medium">{x.count}</span>
+                </div>
+              ))}
+              {byOperatore.length === 0 && <div className="text-sm opacity-60">Nessun dato</div>}
+            </div>
+          </div>
+          <div className="border rounded-xl p-3">
+            <div className="text-sm font-medium mb-2">Per cliente</div>
+            <div className="space-y-1 max-h-[260px] overflow-auto pr-2">
+              {byCliente.map((x) => (
+                <div key={x.name} className="flex items-center justify-between text-sm">
+                  <span className="truncate">{x.name}</span>
+                  <span className="font-medium">{x.count}</span>
+                </div>
+              ))}
+              {byCliente.length === 0 && <div className="text-sm opacity-60">Nessun dato</div>}
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────── */
 /* Componente principale                                          */
 /* ────────────────────────────────────────────────────────────── */
 export default function CofaceAppuntamentiDashboard() {
   const fileInputRef = useRef(null);
   const supabase = getSupabaseClient();
 
-  // Nessun login: creazione sempre possibile, azioni visibili per tutti (protette da password)
   const canInsert = true;
   const canUpdate = true;
   const canDelete = true;
 
-  // sblocco password “123” memorizzato in-page
   const editUnlockedRef = useRef(false);
   function ensureEditPassword() {
     if (editUnlockedRef.current) return true;
-    const pwd = prompt("Modifica protetta.\nInserisci la password:");
+    const pwd = prompt("Modifica protetta.\\nInserisci la password:");
     if (pwd === EDIT_PASSWORD) {
       editUnlockedRef.current = true;
       return true;
@@ -858,6 +973,8 @@ export default function CofaceAppuntamentiDashboard() {
   const [status, setStatus] = useState("tutti");
   const [month, setMonth] = useState("");
   const [day, setDay] = useState("");
+  const [monthIns, setMonthIns] = useState("");     // ✅ nuovo filtro mese su dataInserimento
+  const [dayIns, setDayIns] = useState("");         // ✅ nuovo filtro giorno su dataInserimento
   const [sortBy, setSortBy] = useState("inserimento");
   const [sortDir, setSortDir] = useState("asc");
   const [editing, setEditing] = useState(null);
@@ -909,6 +1026,35 @@ export default function CofaceAppuntamentiDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /* ✅ AUTO: imposta "svolto" dopo 3 giorni dalla data appuntamento (se non già svolto/annullato) */
+  const autoRunRef = useRef(false);
+  useEffect(() => {
+    if (autoRunRef.current) return;
+    if (!rows || rows.length === 0) return;
+
+    const now = new Date();
+    const toAuto = rows.filter((r) => {
+      if (!r?.data) return false;
+      if (r.stato === "svolto" || r.stato === "annullato") return false;
+      const ts = tsFrom(r.data, r.ora || "00:00");
+      if (Number.isNaN(ts)) return false;
+      const THREE_DAYS = 3 * 24 * 60 * 60 * 1000;
+      return now.getTime() - ts >= THREE_DAYS;
+    });
+
+    if (toAuto.length === 0) return;
+
+    (async () => {
+      for (const r of toAuto) {
+        // bypass password: regola automatica di sistema
+        await _updateRow(r.id, { stato: "svolto" });
+      }
+    })();
+
+    autoRunRef.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows]);
+
   /* liste dinamiche */
   const agents = useMemo(
     () => ["tutti", ...Array.from(new Set(rows.map((r) => r.agente).filter(Boolean))).sort((a, b) => a.localeCompare(b))],
@@ -932,6 +1078,8 @@ export default function CofaceAppuntamentiDashboard() {
     if (status !== "tutti") out = out.filter((r) => r.stato === status);
     if (month) out = out.filter((r) => r.data?.startsWith(month));
     if (day) out = out.filter((r) => r.data === day);
+    if (monthIns) out = out.filter((r) => r.dataInserimento?.startsWith(monthIns));   // ✅ filtro mese inserimento
+    if (dayIns) out = out.filter((r) => r.dataInserimento === dayIns);                // ✅ filtro giorno inserimento
     if (q.trim()) {
       const n = q.trim().toLowerCase();
       out = out.filter((r) =>
@@ -952,7 +1100,7 @@ export default function CofaceAppuntamentiDashboard() {
       if (bNa) return sortDir === "asc" ? -1 : 1;
       return sortDir === "asc" ? aKey - bKey : bKey - aKey;
     });
-  }, [rows, agent, creator, client, status, month, day, q, sortBy, sortDir]);
+  }, [rows, agent, creator, client, status, month, day, monthIns, dayIns, q, sortBy, sortDir]);
 
   /* paginazione */
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
@@ -969,8 +1117,6 @@ export default function CofaceAppuntamentiDashboard() {
   }, [filtered]);
 
   /* CRUD (DB) */
-
-  // Creazione “Nuovo”
   function addEmptyRow() {
     setCreateOpen(true);
   }
@@ -1025,7 +1171,6 @@ export default function CofaceAppuntamentiDashboard() {
     }
   }
 
-  // Update grezzo
   async function _updateRow(id, patch) {
     const { data, error } = await supabase
       .from("appointments")
@@ -1045,7 +1190,6 @@ export default function CofaceAppuntamentiDashboard() {
     return true;
   }
 
-  // Update protetto da password
   async function updateRowSecure(id, patch) {
     if (!ensureEditPassword()) return false;
     return _updateRow(id, patch);
@@ -1072,7 +1216,6 @@ export default function CofaceAppuntamentiDashboard() {
     return true;
   }
 
-  // Mark helpers (protetti)
   function markSvolto(r) { return updateRowSecure(r.id, { stato: "svolto" }); }
   function markAnnullato(r) { return updateRowSecure(r.id, { stato: "annullato", dataAnnullamento: todayISO() }); }
   function markRecupero(r) { return updateRowSecure(r.id, { stato: "recuperato" }); }
@@ -1081,7 +1224,7 @@ export default function CofaceAppuntamentiDashboard() {
 
   async function clearAll() {
     const pwd = prompt(
-      "ATTENZIONE: eliminerai TUTTI gli appuntamenti.\nInserisci la password per confermare:"
+      "ATTENZIONE: eliminerai TUTTI gli appuntamenti.\\nInserisci la password per confermare:"
     );
     if (pwd !== CLEAR_ALL_PASSWORD) return alert("Password errata. Operazione annullata.");
     if (!confirm("Confermi l'eliminazione definitiva?")) return;
@@ -1093,7 +1236,6 @@ export default function CofaceAppuntamentiDashboard() {
     setRows([]);
   }
 
-  /* Import/Export */
   function downloadTemplate() {
     const wb = XLSX.utils.book_new();
     const sample = [{
@@ -1133,7 +1275,7 @@ export default function CofaceAppuntamentiDashboard() {
       const json = XLSX.utils.sheet_to_json(ws, { defval: "" });
 
       const mapped = json.map((r) => {
-        let statoRaw = String(r["Stato"] || "").toLowerCase().trim().replace(/\s+/g, "_");
+        let statoRaw = String(r["Stato"] || "").toLowerCase().trim().replace(/\\s+/g, "_");
         if (statoRaw === "da_recuperare") statoRaw = "recuperato";
         const allowed = ["programmato", "svolto", "annullato", "recuperato"];
         const stato = allowed.includes(statoRaw) ? statoRaw : "programmato";
@@ -1218,7 +1360,7 @@ export default function CofaceAppuntamentiDashboard() {
           r.agente || "", r.operatore || "", r.cliente || "", r.provincia || "", "Sì",
         ].map(csvSafe).join(",")
       );
-    const blob = new Blob([header + "\n" + lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const blob = new Blob([header + "\\n" + lines.join("\\n")], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -1323,9 +1465,10 @@ export default function CofaceAppuntamentiDashboard() {
             </div>
           )}
         </td>
-        <td className="p-2 max-w-[260px] truncate" title={r.note}>{r.note}</td>
-        <td className="p-2">
-          <div className="flex gap-1">
+
+        {/* ✅ Colonna “Azioni” sticky e con i pulsanti dentro al contenitore */}
+        <td className="p-2 sticky right-0 bg-white z-10 border-l w-[200px]">
+          <div className="flex flex-wrap gap-1 justify-end">
             <Button
               variant="secondary"
               size="icon"
@@ -1424,6 +1567,10 @@ export default function CofaceAppuntamentiDashboard() {
             setMonth={setMonth}
             day={day}
             setDay={setDay}
+            monthIns={monthIns}
+            setMonthIns={setMonthIns}
+            dayIns={dayIns}
+            setDayIns={setDayIns}
             setPage={setPage}
           />
         </CardContent>
@@ -1457,6 +1604,9 @@ export default function CofaceAppuntamentiDashboard() {
           <KPI />
         </CardContent>
       </Card>
+
+      {/* ✅ Nuova card: statistiche per giorno di inserimento */}
+      <InsertionStatsCard rows={rows} />
 
       {/* STATISTICHE PER OPERATORE */}
       <OperatorStatsCard rowsAll={rows} rowsFiltered={filtered} creators={creators} />
@@ -1497,7 +1647,8 @@ export default function CofaceAppuntamentiDashboard() {
             </div>
           </div>
 
-          <div className="overflow-auto border rounded-xl">
+          {/* ✅ wrapper con overflow-x e posizionamento relativo per la sticky column */}
+          <div className="relative overflow-x-auto border rounded-xl">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-left">
                 <tr>
@@ -1510,15 +1661,17 @@ export default function CofaceAppuntamentiDashboard() {
                   <th className="p-2">Agente</th>
                   <th className="p-2">Operatore</th>
                   <th className="p-2">Stato</th>
-                  <th className="p-2">Note</th>
-                  <th className="p-2">Azioni</th>
+                  {/* ✅ header sticky allineato alla colonna azioni */}
+                  <th className="p-2 sticky right-0 bg-white z-20 w-[200px] shadow-[inset_8px_0_8px_-8px_rgba(0,0,0,0.12)]">
+                    Azioni
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {pageRows.map((r) => (<Row key={r.id} r={r} />))}
                 {pageRows.length === 0 && (
                   <tr>
-                    <td colSpan={11} className="p-6 text-center text-sm opacity-60">
+                    <td colSpan={10} className="p-6 text-center text-sm opacity-60">
                       Nessun risultato
                     </td>
                   </tr>
