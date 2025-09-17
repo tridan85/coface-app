@@ -15,7 +15,6 @@ import {
   FileSpreadsheet,
   Search,
   DollarSign,
-  CheckCheck,
 } from "lucide-react";
 import { Button } from "@/components/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/card";
@@ -34,6 +33,7 @@ import LogoutButton from "@/components/LogoutButton";
 // Supabase client lato browser
 import { getSupabaseClient } from "@/lib/supabaseClient";
 import CreateAppointmentModal from "@/components/CreateAppointmentModal";
+
 /* ────────────────────────────────────────────────────────────── */
 /* Costanti / util                                                */
 /* ────────────────────────────────────────────────────────────── */
@@ -43,6 +43,7 @@ const STATUSES = [
   { value: "annullato", label: "Annullato" },
   { value: "recuperato", label: "Recuperato" },
 ];
+
 const CLIENTI_CANONICI = [
   "Coface",
   "Credit Partner",
@@ -73,8 +74,7 @@ function nowHM() {
 function parseExcelDate(v) {
   if (v == null || v === "") return "";
   if (typeof v === "number") return XLSX.SSF.format("yyyy-mm-dd", v);
-  if (v instanceof Date) return dateToLocalISO(v);
-  // <-- locale
+  if (v instanceof Date) return dateToLocalISO(v); // <-- locale
   if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
   const m = String(v).match(/(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})/);
   if (m) {
@@ -206,8 +206,28 @@ const DEFAULT_HEADERS = [
   "Fatturato",
   "Data Fatturazione",
 ];
+
 /* ─────────────────────────────────────────────────────────── */
+// ───────────────────────────────────────────────────────────
+// Normalizzazione Operatore (case-insensitive) + Confermato
+// ───────────────────────────────────────────────────────────
+function normOp(s){return (s??"").trim().toLowerCase();}
+function canonicalizeOperators(rows){
+  const map=new Map();
+  for (const r of rows){ const raw=r?.operatore??""; const k=normOp(raw); if(!k) continue; if(!map.has(k)) map.set(k,raw); }
+  return map; // { "mario": "Mario" }
+}
+function isConfirmed(r){ return /\[#CONF\]/i.test(r?.note||""); }
+function toggleConfirmNote(note,to){
+  const has=/\[#CONF\]/i.test(note||"");
+  if(to && !has) return ((note||"")+" [#CONF]").trim();
+  if(!to && has) return (note||"").replace(/\s*\[#CONF\]\s*/gi," ").trim();
+  return note||"";
+}
+// ───────────────────────────────────────────────────────────
+
 /* Editor (modale)                                             */
+
 /* ─────────────────────────────────────────────────────────── */
 function Editor({
   editing,
@@ -234,6 +254,7 @@ function Editor({
     },
     disabled: locked && k !== "note",
   });
+
   return (
     <div
       className="fixed inset-0 bg-black/30 flex items-end md:items-center justify-center p-4 z-50"
@@ -273,7 +294,6 @@ function Editor({
             <Label>Azienda</Label>
             <Input {...commonInputProps("azienda")} />
           </div>
-
           <div>
             <Label>Referente</Label>
             <Input {...commonInputProps("referente")} />
@@ -456,8 +476,7 @@ function Editor({
 /* ────────────────────────────────────────────────────────────── */
 /* Barre comandi                                                  */
 /* ────────────────────────────────────────────────────────────── */
-function FiltersBar({
-  q,
+function FiltersBar({ q,
   setQ,
   client,
   setClient,
@@ -470,221 +489,179 @@ function FiltersBar({
   creators,
   status,
   setStatus,
-  dayAppFrom,
-  setDayAppFrom,
-  dayAppTo,
-  setDayAppTo,
-  dayInsFrom,
-  setDayInsFrom,
-  dayInsTo,
-  setDayInsTo,
-  setPage,
-}) {
-  const handleTodayInsertion = () => {
-    const today = todayISO();
-    setDayInsFrom(today);
-    setDayInsTo(today);
-    setPage(1);
-  };
-  
-  const handleClearInsertionDates = () => {
-    setDayInsFrom("");
-    setDayInsTo("");
-    setPage(1);
-  };
-
-  const handleClearAppointmentDates = () => {
-    setDayAppFrom("");
-    setDayAppTo("");
-    setPage(1);
-  };
-
+  month,
+  setMonth,
+  day,
+  setDay,
+  monthIns,
+  setMonthIns,
+  dayIns,
+  setDayIns, insFrom, setInsFrom, insTo, setInsTo, setPage,
+ }) {
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-        <div className="sm:col-span-2">
-          <Label>Cerca</Label>
-          <div className="relative">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4" />
-            <Input
-              className="pl-8"
-              placeholder="Azienda, referente, regione, note, provincia, ID Contaq…"
-              value={q}
-              onChange={(e) => {
-                setQ(e.target.value);
-                setPage(1);
-              }}
-            />
-          </div>
-        </div>
-        <div>
-          <Label>Cliente</Label>
-          <Select
-            value={client}
-            onValueChange={(v) => {
-              setClient(v);
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-9 gap-3">
+      <div className="sm:col-span-2">
+        <Label>Cerca</Label>
+        <div className="relative">
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4" />
+          <Input
+            className="pl-8"
+            placeholder="Azienda, referente, regione, note, provincia, ID Contaq…"
+            value={q}
+            onChange={(e) => {
+              setQ(e.target.value);
               setPage(1);
             }}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Tutti" />
-            </SelectTrigger>
-            <SelectContent>
-              {clients.map((c) => (
-                <SelectItem key={c} value={c}>
-                  {c === "tutti" ? "Tutti" : c}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div>
-          <Label>Agente</Label>
-          <Select
-            value={agent}
-            onValueChange={(v) => {
-              setAgent(v);
-              setPage(1);
-            }}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Tutti" />
-            </SelectTrigger>
-            <SelectContent>
-              {agents.map((a) => (
-                <SelectItem key={a} value={a}>
-                  {a === "tutti" ? "Tutti" : a}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div>
-          <Label>Operatore</Label>
-          <Select
-            value={creator}
-            onValueChange={(v) => {
-              setCreator(v);
-              setPage(1);
-            }}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Tutti" />
-            </SelectTrigger>
-            <SelectContent>
-              {creators.map((a) => (
-                <SelectItem key={a} value={a}>
-                  {a === "tutti" ? "Tutti" : a}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          />
         </div>
       </div>
-      
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-        <div className="col-span-2">
-          <div className="flex items-end justify-between mb-1">
-            <Label>Appuntamento</Label>
-            <Button
-              variant="link"
-              size="sm"
-              onClick={handleClearAppointmentDates}
-              className="h-auto p-0 text-xs text-red-600 hover:text-red-500"
-            >
-              Cancella
-            </Button>
-          </div>
-          <div className="flex gap-2">
-            <Input
-              type="date"
-              placeholder="Dal gg/mm/aaaa"
-              value={dayAppFrom}
-              onChange={(e) => {
-                setDayAppFrom(e.target.value);
-                setPage(1);
-              }}
-            />
-            <Input
-              type="date"
-              placeholder="Al gg/mm/aaaa"
-              value={dayAppTo}
-              onChange={(e) => {
-                setDayAppTo(e.target.value);
-                setPage(1);
-              }}
-            />
-          </div>
-        </div>
-        
-        <div className="col-span-2">
-          <div className="flex items-end justify-between mb-1">
-            <Label>Inserimento</Label>
-            <div className="flex gap-1">
-              <Button
-                variant="link"
-                size="sm"
-                onClick={handleTodayInsertion}
-                className="h-auto p-0 text-xs text-blue-600 hover:text-blue-500"
-              >
-                Oggi
-              </Button>
-              <Button
-                variant="link"
-                size="sm"
-                onClick={handleClearInsertionDates}
-                className="h-auto p-0 text-xs text-red-600 hover:text-red-500"
-              >
-                Cancella
-              </Button>
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <Input
-              type="date"
-              placeholder="Dal gg/mm/aaaa"
-              value={dayInsFrom}
-              onChange={(e) => {
-                setDayInsFrom(e.target.value);
-                setPage(1);
-              }}
-            />
-            <Input
-              type="date"
-              placeholder="Al gg/mm/aaaa"
-              value={dayInsTo}
-              onChange={(e) => {
-                setDayInsTo(e.target.value);
-                setPage(1);
-              }}
-            />
-          </div>
-        </div>
-        
-        <div>
-          <Label>Stato</Label>
-          <Select
-            value={status}
-            onValueChange={(v) => {
-              setStatus(v);
-              setPage(1);
-            }}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Tutti" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="tutti">Tutti</SelectItem>
-              {STATUSES.map((s) => (
-                <SelectItem key={s.value} value={s.value}>
-                  {s.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+      <div>
+        <Label>Cliente</Label>
+        <Select
+          value={client}
+          onValueChange={(v) => {
+            setClient(v);
+            setPage(1);
+          }}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Tutti" />
+          </SelectTrigger>
+          <SelectContent>
+            {clients.map((c) => (
+              <SelectItem key={c} value={c}>
+                {c === "tutti" ? "Tutti" : c}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div>
+        <Label>Agente</Label>
+        <Select
+          value={agent}
+          onValueChange={(v) => {
+            setAgent(v);
+            setPage(1);
+          }}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Tutti" />
+          </SelectTrigger>
+          <SelectContent>
+            {agents.map((a) => (
+              <SelectItem key={a} value={a}>
+                {a === "tutti" ? "Tutti" : a}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div>
+        <Label>Operatore</Label>
+        <Select
+          value={creator}
+          onValueChange={(v) => {
+            setCreator(v);
+            setPage(1);
+          }}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Tutti" />
+          </SelectTrigger>
+          <SelectContent>
+            {creators.map((a) => (
+              <SelectItem key={a} value={a}>
+                {a === "tutti" ? "Tutti" : a}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div>
+        <Label>Stato</Label>
+        <Select
+          value={status}
+          onValueChange={(v) => {
+            setStatus(v);
+            setPage(1);
+          }}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Tutti" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="tutti">Tutti</SelectItem>
+            {STATUSES.map((s) => (
+              <SelectItem key={s.value} value={s.value}>
+                {s.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div>
+        <Label>Mese (appuntamento)</Label>
+        <Input
+          type="month"
+          value={month}
+          onChange={(e) => {
+            setMonth(e.target.value);
+            setPage(1);
+          }}
+        />
+      </div>
+      <div>
+        <Label>Giorno (appuntamento)</Label>
+        <Input
+          type="date"
+          value={day}
+          onChange={(e) => {
+            setDay(e.target.value);
+            setPage(1);
+          }}
+        />
+      </div>
+      <div>
+        <Label>Mese (inserimento)</Label>
+        <Input
+          type="month"
+          value={monthIns}
+          onChange={(e) => {
+            setMonthIns(e.target.value);
+            setPage(1);
+          }}
+        />
+      </div>
+      <div>
+        <Label>Giorno (inserimento)</Label>
+        <Input
+          type="date"
+          value={dayIns}
+          onChange={(e) => {
+            setDayIns(e.target.value);
+            setPage(1);
+          }}
+        />
       </div>
     </div>
+      <div>
+        <Label>Inserimento dal</Label>
+        <div className="relative">
+          <Calendar className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4" />
+          <Input type="date" className="pl-8" value={insFrom}
+            onChange={(e)=>{ setInsFrom(e.target.value); setPage(1); }} />
+        </div>
+      </div>
+      <div>
+        <Label>Inserimento al</Label>
+        <div className="relative">
+          <Calendar className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4" />
+          <Input type="date" className="pl-8" value={insTo}
+            onChange={(e)=>{ setInsTo(e.target.value); setPage(1); }} />
+        </div>
+      </div>
+  
   );
 }
 
@@ -818,9 +795,10 @@ function OperatorStatsCard({ rowsAll, rowsFiltered, creators }) {
 
   const base = respectFilters ? rowsFiltered : rowsAll;
   const dataRows = React.useMemo(
-    () => (selectedOp === "tutti" ? base : base.filter((r) => r.operatore?.toLowerCase() === selectedOp)),
+    () => (selectedOp === "tutti" ? base : base.filter((r) => r.operatore === selectedOp)),
     [base, selectedOp]
   );
+
   const kpis = React.useMemo(() => {
     const out = { tot: 0, programmato: 0, svolto: 0, annullato: 0, recuperato: 0 };
     for (const r of dataRows) {
@@ -831,6 +809,7 @@ function OperatorStatsCard({ rowsAll, rowsFiltered, creators }) {
     out.annRate = out.tot ? out.annullato / out.tot : 0;
     return out;
   }, [dataRows]);
+
   const byAppMonth = React.useMemo(
     () => aggregateByMonth(dataRows, "data").map((x) => ({ label: x.month, value: x.count })),
     [dataRows]
@@ -839,18 +818,21 @@ function OperatorStatsCard({ rowsAll, rowsFiltered, creators }) {
     () => aggregateByMonth(dataRows, "dataInserimento").map((x) => ({ label: x.month, value: x.count })),
     [dataRows]
   );
+
   const byStatus = [
     { name: "Programmato", value: kpis.programmato, color: "#3b82f6" },
     { name: "Svolto", value: kpis.svolto, color: "#22c55e" },
     { name: "Annullato", value: kpis.annullato, color: "#ef4444" },
     { name: "Recuperato", value: kpis.recuperato, color: "#f59e0b" },
   ];
+
   const chip = (label, value) => (
     <div className="rounded-2xl border px-4 py-2 text-sm bg-white shadow-sm">
       <span className="opacity-60 mr-2">{label}</span>
       <span className="font-semibold">{value}</span>
     </div>
   );
+
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -916,6 +898,7 @@ function InsertionStatsCard({ rows }) {
     const arr = Array.from(set);
     return arr.slice(-30);
   }, [rows]);
+
   const byDay = React.useMemo(() => {
     const map = new Map();
     for (const r of rows) {
@@ -934,12 +917,13 @@ function InsertionStatsCard({ rows }) {
     const map = new Map();
     for (const r of rows) {
       if (!r.dataInserimento || !last30Dates.includes(r.dataInserimento)) continue;
-      map.set((r.operatore || "—").toLowerCase(), (map.get((r.operatore || "—").toLowerCase()) || 0) + 1);
+      map.set(r.operatore || "—", (map.get(r.operatore || "—") || 0) + 1);
     }
     return Array.from(map.entries())
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count);
   }, [rows, last30Dates]);
+
   const byCliente = React.useMemo(() => {
     const map = new Map();
     for (const r of rows) {
@@ -950,6 +934,7 @@ function InsertionStatsCard({ rows }) {
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count);
   }, [rows, last30Dates]);
+
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -1002,7 +987,7 @@ export default function CofaceAppuntamentiDashboard() {
   const editUnlockedRef = useRef(false);
   function ensureEditPassword() {
     if (editUnlockedRef.current) return true;
-    const pwd = prompt("Modifica protetta.\nInserisci la password:");
+    const pwd = prompt("Modifica protetta.\\nInserisci la password:");
     if (pwd === EDIT_PASSWORD) {
       editUnlockedRef.current = true;
       return true;
@@ -1013,22 +998,27 @@ export default function CofaceAppuntamentiDashboard() {
 
   /* dati dal DB */
   const [rows, setRows] = useState([]);
+
   /* filtri / ordinamento / UI */
   const [q, setQ] = useState("");
   const [agent, setAgent] = useState("tutti");
   const [creator, setCreator] = useState("tutti");
   const [client, setClient] = useState("tutti");
   const [status, setStatus] = useState("tutti");
-  const [dayAppFrom, setDayAppFrom] = useState("");
-  const [dayAppTo, setDayAppTo] = useState("");
-  const [dayInsFrom, setDayInsFrom] = useState("");
-  const [dayInsTo, setDayInsTo] = useState("");
+  const [month, setMonth] = useState("");
+  const [day, setDay] = useState("");
+  const [monthIns, setMonthIns] = useState("");     // ✅ nuovo filtro mese su dataInserimento
+  const [dayIns, setDayIns] = useState("");
+  const [insFrom, setInsFrom] = useState(""); // Inserimento dal (yyyy-mm-dd)
+  const [insTo, setInsTo]     = useState(""); // Inserimento al  (yyyy-mm-dd)
+         // ✅ nuovo filtro giorno su dataInserimento
   const [sortBy, setSortBy] = useState("inserimento");
   const [sortDir, setSortDir] = useState("asc");
   const [editing, setEditing] = useState(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [createOpen, setCreateOpen] = useState(false);
+
   // Primo fetch (pubblico) + realtime
   useEffect(() => {
     let mounted = true;
@@ -1065,12 +1055,14 @@ export default function CofaceAppuntamentiDashboard() {
         }
       )
       .subscribe();
+
     return () => {
       mounted = false;
       supabase.removeChannel(ch);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
   /* ✅ AUTO: imposta "svolto" dopo 3 giorni dalla data appuntamento (se non già svolto/annullato) */
   const autoRunRef = useRef(false);
   useEffect(() => {
@@ -1099,56 +1091,22 @@ export default function CofaceAppuntamentiDashboard() {
     autoRunRef.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows]);
+
   /* liste dinamiche */
   const agents = useMemo(
     () => ["tutti", ...Array.from(new Set(rows.map((r) => r.agente).filter(Boolean))).sort((a, b) => a.localeCompare(b))],
     [rows]
   );
-  const creators = useMemo(
-    () => ["tutti", ...Array.from(new Set(rows.map((r) => r.operatore).filter(Boolean).map(s => s.toLowerCase()))).sort((a, b) => a.localeCompare(b))],
-    [rows]
-  );
-  const clients = useMemo(
-    () => ["tutti", ...Array.from(new Set([...CLIENTI_CANONICI, ...rows.map((r) => r.cliente).filter(Boolean)]))],
-    [rows]
-  );
-  /* filtra + ordina */
-  const filtered = useMemo(() => {
-    let out = rows;
-    if (agent !== "tutti") out = out.filter((r) => r.agente === agent);
-    if (creator !== "tutti") out = out.filter((r) => r.operatore?.toLowerCase() === creator);
-    if (client !== "tutti") out = out.filter((r) => r.cliente === client);
-    if (status !== "tutti") out = out.filter((r) => r.stato === status);
-    if (dayAppFrom) out = out.filter((r) => r.data >= dayAppFrom);
-    if (dayAppTo) out = out.filter((r) => r.data <= dayAppTo);
-    if (dayInsFrom) out = out.filter((r) => r.dataInserimento >= dayInsFrom);
-    if (dayInsTo) out = out.filter((r) => r.dataInserimento <= dayInsTo);
-    
-    if (q.trim()) {
-      const n = q.trim().toLowerCase();
-      out = out.filter((r) =>
-        [
-          r.azienda, r.referente, r.email, r.telefono, r.città, r.indirizzo,
-          r.provincia, r.agente, r.operatore, r.cliente, r.idContaq, r.note,
-        ]
-          .filter(Boolean)
-          .some((v) => String(v).toLowerCase().includes(n))
-      );
-    }
-    return out.sort((a, b) => {
-      const aKey = sortBy === "inserimento" ? tsFrom(a.dataInserimento, a.oraInserimento) : tsFrom(a.data, a.ora);
-      const bKey = sortBy === "inserimento" ? tsFrom(b.dataInserimento, b.oraInserimento) : tsFrom(b.data, b.ora);
-      const aNa = Number.isNaN(aKey), bNa = Number.isNaN(bKey);
-      if (aNa && bNa) return 0;
-      if (aNa) return sortDir === "asc" ? 1 : -1;
-      if (bNa) return sortDir === "asc" ? -1 : 1;
-      return sortDir === "asc" ? aKey - bKey : bKey - aKey;
-    });
-  }, [rows, agent, creator, client, status, dayAppFrom, dayAppTo, dayInsFrom, dayInsTo, q, sortBy, sortDir]);
-  /* paginazione */
+  const creators = useMemo(() => {
+    const map = canonicalizeOperators(rows);
+    const display = Array.from(map.values()).sort((a,b)=>a.localeCompare(b));
+    return ["tutti", ...display];
+  }, [rows]);
+    /* paginazione */
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize);
   useEffect(() => { if (page > totalPages) setPage(1); }, [totalPages, page]);
+
   /* KPI */
   const kpis = useMemo(() => {
     const base = { programmato: 0, svolto: 0, annullato: 0, recuperato: 0 };
@@ -1157,7 +1115,10 @@ export default function CofaceAppuntamentiDashboard() {
     const fatturati = filtered.filter((r) => r.fatturato).length;
     return { ...base, fatturabili, fatturati, totale: filtered.length };
   }, [filtered]);
+
   /* CRUD (DB) */
+  async function updateRowFree(id, patch){ return _updateRow(id, patch); }
+
   function addEmptyRow() {
     setCreateOpen(true);
   }
@@ -1185,13 +1146,14 @@ export default function CofaceAppuntamentiDashboard() {
       note: form.note || "",
       fatturato: !!form.fatturato,
       dataFatturazione: null,
-      confermato: false,
     };
+
     try {
       const { data, error } = await supabase
         .from("appointments")
         .insert(rowToDb(newRow))
         .select("id");
+
       if (error) {
         alert(`Errore creazione: ${error.message}`);
         return false;
@@ -1217,6 +1179,7 @@ export default function CofaceAppuntamentiDashboard() {
       .update(rowToDb(patch))
       .eq("id", id)
       .select("id");
+
     if (error) {
       alert(`Errore salvataggio: ${error.message}`);
       return false;
@@ -1233,33 +1196,16 @@ export default function CofaceAppuntamentiDashboard() {
     if (!ensureEditPassword()) return false;
     return _updateRow(id, patch);
   }
-  
-  async function updateConfirmed(r) {
-    const patch = { confermato: !r.confermato };
-    const { data, error } = await supabase
-      .from("appointments")
-      .update(patch)
-      .eq("id", r.id)
-      .select("id");
-    if (error) {
-      alert(`Errore aggiornamento: ${error.message}`);
-      return false;
-    }
-    if (!data || data.length === 0) {
-      alert("Permesso negato (RLS)");
-      return false;
-    }
-    setRows((p) => p.map((row) => (row.id === r.id ? { ...row, ...patch } : row)));
-    return true;
-  }
 
   async function removeRow(id) {
     if (!ensureEditPassword()) return false;
+
     const { data, error } = await supabase
       .from("appointments")
       .delete()
       .eq("id", id)
       .select("id");
+
     if (error) {
       alert(`Errore eliminazione: ${error.message}`);
       return false;
@@ -1280,7 +1226,7 @@ export default function CofaceAppuntamentiDashboard() {
 
   async function clearAll() {
     const pwd = prompt(
-      "ATTENZIONE: eliminerai TUTTI gli appuntamenti.\nInserisci la password per confermare:"
+      "ATTENZIONE: eliminerai TUTTI gli appuntamenti.\\nInserisci la password per confermare:"
     );
     if (pwd !== CLEAR_ALL_PASSWORD) return alert("Password errata. Operazione annullata.");
     if (!confirm("Confermi l'eliminazione definitiva?")) return;
@@ -1329,8 +1275,9 @@ export default function CofaceAppuntamentiDashboard() {
       const wb = XLSX.read(data, { type: "array" });
       const ws = wb.Sheets[wb.SheetNames[0]];
       const json = XLSX.utils.sheet_to_json(ws, { defval: "" });
+
       const mapped = json.map((r) => {
-        let statoRaw = String(r["Stato"] || "").toLowerCase().trim().replace(/\s+/g, "_");
+        let statoRaw = String(r["Stato"] || "").toLowerCase().trim().replace(/\\s+/g, "_");
         if (statoRaw === "da_recuperare") statoRaw = "recuperato";
         const allowed = ["programmato", "svolto", "annullato", "recuperato"];
         const stato = allowed.includes(statoRaw) ? statoRaw : "programmato";
@@ -1415,7 +1362,7 @@ export default function CofaceAppuntamentiDashboard() {
           r.agente || "", r.operatore || "", r.cliente || "", r.provincia || "", "Sì",
         ].map(csvSafe).join(",")
       );
-    const blob = new Blob([header + "\n" + lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const blob = new Blob([header + "\\n" + lines.join("\\n")], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -1485,12 +1432,8 @@ export default function CofaceAppuntamentiDashboard() {
 
     return (
       <tr className="border-b hover:bg-gray-50">
-        <td className="p-2 font-mono text-xs opacity-60">
-          <div>{r.id}</div>
-          {r.confermato && <div className="text-[11px] text-green-600 font-semibold">Confermato</div>}
-        </td>
-        <td className="p-2">{r.operatore || <span className="opacity-50">—</span>}</td>
-        <td className="p-2 whitespace-nowrap">
+        <td className="p-2 font-mono text-xs opacity-60">{r.id}</td>
+<td className="p-2 whitespace-nowrap">
           {fmtDate(r.dataInserimento)}
           <div className="text-xs opacity-60">{r.oraInserimento}</div>
         </td>
@@ -1503,11 +1446,12 @@ export default function CofaceAppuntamentiDashboard() {
           <div className="text-xs opacity-60">{r.referente || ""}</div>
         </td>
         <td className="p-2">
-          <div>{r.città || <span className="opacity-50">—</span>}</div>
+          <div>{r.città}</div>
           <div className="text-xs opacity-60">{r.provincia}</div>
         </td>
         <td className="p-2">{r.cliente || <span className="opacity-50">—</span>}</td>
         <td className="p-2">{r.agente}</td>
+        <td className="p-2">{r.operatore || <span className="opacity-50">—</span>}</td>
         <td className="p-2">
           <span className={`text-xs px-2 py-1 rounded-full border ${statusBadge}`}>
             {STATUSES.find((s) => s.value === r.stato)?.label}
@@ -1525,8 +1469,14 @@ export default function CofaceAppuntamentiDashboard() {
         </td>
 
         {/* ✅ Colonna “Azioni” sticky e con i pulsanti dentro al contenitore */}
-        <td className="p-2 sticky right-0 bg-white z-10 border-l w-[200px]">
-          <div className="flex items-center gap-1">
+        
+    <td className="p-2">
+      <input type="checkbox" className="h-4 w-4"
+        checked={isConfirmed(r)}
+        onChange={async (e)=>{ const next=toggleConfirmNote(r.note, e.target.checked); await updateRowFree(r.id,{note:next}); }} />
+    </td>
+    <td className="p-2 sticky right-0 bg-white z-10 border-l w-[200px]">
+          <div className="flex flex-wrap gap-1 justify-end">
             <Button
               variant="secondary"
               size="icon"
@@ -1559,6 +1509,16 @@ export default function CofaceAppuntamentiDashboard() {
                 >
                   <X className="h-4 w-4" />
                 </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => markRecupero(r)}
+                  title="Recuperato"
+                  disabled={r.fatturato}
+                >
+                  <RotateCcw className="h-4 w-4" />
+                </Button>
               </>
             )}
 
@@ -1574,16 +1534,6 @@ export default function CofaceAppuntamentiDashboard() {
                 <Trash2 className="h-4 w-4" />
               </Button>
             )}
-            
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-8 w-8"
-              onClick={() => updateConfirmed(r)}
-              title={r.confermato ? 'Togli conferma' : 'Conferma'}
-            >
-              <CheckCheck className="h-4 w-4" />
-            </Button>
           </div>
         </td>
       </tr>
@@ -1621,16 +1571,17 @@ export default function CofaceAppuntamentiDashboard() {
             creators={creators}
             status={status}
             setStatus={setStatus}
-            dayAppFrom={dayAppFrom}
-            setDayAppFrom={setDayAppFrom}
-            dayAppTo={dayAppTo}
-            setDayAppTo={setDayAppTo}
-            dayInsFrom={dayInsFrom}
-            setDayInsFrom={setDayInsFrom}
-            dayInsTo={dayInsTo}
-            setDayInsTo={setDayInsTo}
-            setPage={setPage}
-          />
+            month={month}
+            setMonth={setMonth}
+            day={day}
+            setDay={setDay}
+            monthIns={monthIns}
+            setMonthIns={setMonthIns}
+            dayIns={dayIns}
+            setDayIns={setDayIns}
+            insFrom={insFrom} setInsFrom={setInsFrom}
+            insTo={insTo}     setInsTo={setInsTo}
+            setPage={setPage} />
         </CardContent>
       </Card>
 
@@ -1711,16 +1662,16 @@ export default function CofaceAppuntamentiDashboard() {
               <thead className="bg-gray-50 text-left">
                 <tr>
                   <th className="p-2">ID</th>
-                  <th className="p-2">Operatore</th>
-                  <th className="p-2">Inserimento</th>
+                  <th className="p-2">Operatore</th><th className="p-2">Inserimento</th>
                   <th className="p-2">Appuntamento</th>
                   <th className="p-2">Azienda</th>
-                  <th className="p-2">Luogo</th>
+                  <th className="p-2">Regione/Prov.</th>
                   <th className="p-2">Cliente</th>
                   <th className="p-2">Agente</th>
+                  <th className="p-2">Operatore</th>
                   <th className="p-2">Stato</th>
                   {/* ✅ header sticky allineato alla colonna azioni */}
-                  <th className="p-2 sticky right-0 bg-white z-20 w-[200px] shadow-[inset_8px_0_8px_-8px_rgba(0,0,0,0.12)]">
+                  <th className="p-2">Confermato</th><th className="p-2 sticky right-0 bg-white z-20 w-[200px] shadow-[inset_8px_0_8px_-8px_rgba(0,0,0,0.12)]">
                     Azioni
                   </th>
                 </tr>
