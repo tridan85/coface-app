@@ -1,17 +1,31 @@
-
 // components/CreateAppointmentModal.jsx
 "use client";
+
 import React, { useState } from "react";
 import { Button } from "@/components/button";
 import { Input } from "@/components/input";
 import { Label } from "@/components/label";
-import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/select";
+import {
+  Select,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+  SelectValue,
+} from "@/components/select";
 import { Calendar, Plus } from "lucide-react";
 
-export default function CreateAppointmentModal({ open, setOpen, onCreate, clientiOpzioni, canInsert }) {
+export default function CreateAppointmentModal({
+  open,
+  setOpen,
+  onCreate,
+  clientiOpzioni,
+  canInsert,
+}) {
   if (!open || !canInsert) return null;
 
   const [saving, setSaving] = useState(false);
+
+  // N.B.: in UI usiamo "città" (accentata). In DB è "citta".
   const [f, setF] = useState({
     idContaq: "",
     data: "",
@@ -21,6 +35,7 @@ export default function CreateAppointmentModal({ open, setOpen, onCreate, client
     telefono: "",
     email: "",
     indirizzo: "",
+    // Regione (UI) -> chiave "città"
     città: "",
     provincia: "",
     agente: "",
@@ -29,20 +44,29 @@ export default function CreateAppointmentModal({ open, setOpen, onCreate, client
     stato: "programmato",
     note: "",
     fatturato: false,
+    // nuovo campo:
+    tipoAppuntamento: "in_sede", // "in_sede" | "videocall"
   });
 
-  const ch = (k) => (e) => setF((p) => ({ ...p, [k]: e.target ? e.target.value : e }));
+  const ch = (k) => (e) =>
+    setF((p) => ({ ...p, [k]: e?.target ? e.target.value : e }));
 
   async function submit() {
     setSaving(true);
-    const ok = await onCreate(f);
+    const ok = await onCreate(f); // f contiene "città"
     setSaving(false);
     if (ok) setOpen(false);
   }
 
   return (
-    <div className="fixed inset-0 bg-black/30 flex items-end md:items-center justify-center p-4 z-50" onClick={() => setOpen(false)}>
-      <div className="bg-white rounded-2xl shadow-xl w-full md:max-w-3xl" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 bg-black/30 flex items-end md:items-center justify-center p-4 z-50"
+      onClick={() => setOpen(false)}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-xl w-full md:max-w-3xl"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center justify-between p-4 border-b">
           <div className="flex items-center gap-2">
             <Calendar className="h-5 w-5" />
@@ -64,6 +88,7 @@ export default function CreateAppointmentModal({ open, setOpen, onCreate, client
             <Label>Azienda</Label>
             <Input value={f.azienda} onChange={ch("azienda")} />
           </div>
+
           <div>
             <Label>Referente</Label>
             <Input value={f.referente} onChange={ch("referente")} />
@@ -72,13 +97,15 @@ export default function CreateAppointmentModal({ open, setOpen, onCreate, client
             <Label>Telefono</Label>
             <Input value={f.telefono} onChange={ch("telefono")} />
           </div>
+
           <div>
             <Label>Email</Label>
             <Input value={f.email} onChange={ch("email")} />
           </div>
 
           <div>
-            <Label>Città</Label>
+            <Label>Regione</Label>
+            {/* IMPORTANTE: chiave "città" (accentata) */}
             <Input value={f["città"]} onChange={ch("città")} />
           </div>
           <div>
@@ -97,14 +124,35 @@ export default function CreateAppointmentModal({ open, setOpen, onCreate, client
 
           <div>
             <Label>Cliente</Label>
-            <Select value={f.cliente} onValueChange={(v) => setF((p) => ({ ...p, cliente: v }))}>
+            <Select
+              value={f.cliente}
+              onValueChange={(v) => setF((p) => ({ ...p, cliente: v }))}
+            >
               <SelectTrigger>
                 <SelectValue placeholder="Seleziona cliente" />
               </SelectTrigger>
               <SelectContent>
                 {clientiOpzioni.map((c) => (
-                  <SelectItem key={c} value={c}>{c}</SelectItem>
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div>
+            <Label>Tipo appuntamento</Label>
+            <Select
+              value={f.tipoAppuntamento}
+              onValueChange={(v) => setF((p) => ({ ...p, tipoAppuntamento: v }))}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="in_sede">In sede</SelectItem>
+                <SelectItem value="videocall">Videocall</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -120,8 +168,16 @@ export default function CreateAppointmentModal({ open, setOpen, onCreate, client
           </div>
         </div>
 
+        <div className="md:col-span-2">
+  <Label>Indirizzo (solo interno)</Label>
+  <Input value={f.indirizzo} onChange={ch("indirizzo")} />
+</div>
+
+
         <div className="p-4 border-t flex items-center justify-end gap-2">
-          <Button variant="outline" onClick={() => setOpen(false)}>Annulla</Button>
+          <Button variant="outline" onClick={() => setOpen(false)}>
+            Annulla
+          </Button>
           <Button onClick={submit} className="gap-2" disabled={saving}>
             <Plus className="h-4 w-4" /> {saving ? "Creazione..." : "Crea"}
           </Button>

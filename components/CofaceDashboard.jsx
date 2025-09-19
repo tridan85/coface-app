@@ -16,6 +16,7 @@ import {
   Search,
   DollarSign,
   CheckCheck,
+  Mail,
 } from "lucide-react";
 import { Button } from "@/components/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/card";
@@ -206,6 +207,98 @@ const DEFAULT_HEADERS = [
   "Fatturato",
   "Data Fatturazione",
 ];
+
+// --- EMAIL UTILS (Gmail compose con fallback mailto) ---
+function gmailComposeURL({
+  to,
+  cc,
+  bcc,
+  subject,
+  body,
+}) {
+  const enc = encodeURIComponent;
+  const arr = (v) =>
+    !v ? "" : Array.isArray(v) ? v.join(",") : v;
+
+  const base = "https://mail.google.com/mail/?view=cm&fs=1&tf=1";
+  const url =
+    `${base}` +
+    `&to=${enc(arr(to))}` +
+    (cc ? `&cc=${enc(arr(cc))}` : "") +
+    (bcc ? `&bcc=${enc(arr(bcc))}` : "") +
+    `&su=${enc(subject)}` +
+    `&body=${enc(body)}`;
+  return url;
+}
+
+function openEmail(params) {
+  const url = gmailComposeURL(params);
+  const w = window.open(url, "_blank");
+  if (!w || w.closed || typeof w.closed === "undefined") {
+    const enc = encodeURIComponent;
+    const subject = enc(params.subject);
+    const body = enc(params.body);
+    const to = Array.isArray(params.to) ? params.to.join(",") : params.to;
+    window.location.href = `mailto:${to}?subject=${subject}&body=${body}`;
+  }
+}
+
+function makeEmailAzienda(r) {
+  const when = `${r?.data || ""} ${r?.ora || ""}`.trim();
+  const subject = `Conferma appuntamento ${r?.azienda ?? ""} – ${when}`;
+  const body = [
+    `Buongiorno ${r?.referente || ""},`,
+    ``,
+    `confermiamo l’appuntamento fissato per ${when}.`,
+    r?.agente ? `Agente incaricato: ${r.agente}.` : "",
+    r?.indirizzo ? `Indirizzo: ${r.indirizzo}.` : "",
+    ``,
+    `Riepilogo:`,
+    `• Azienda: ${r?.azienda || ""}`,
+    `• Referente: ${r?.referente || ""}`,
+    `• Telefono: ${r?.telefono || ""}`,
+    `• Email: ${r?.email || ""}`,
+    `• Regione: ${r?.città || ""}`,
+    r?.note ? `• Note: ${r.note}` : "",
+    ``,
+    `Grazie,`,
+    `Team Coface`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const to = r?.email || "";
+  return { to, subject, body };
+}
+
+function makeEmailAgente(r) {
+  const when = `${r?.data || ""} ${r?.ora || ""}`.trim();
+  const subject = `Nuovo appuntamento – ${r?.azienda ?? ""} – ${when}`;
+  const body = [
+    `Gentile ${r?.agente || ""},`,
+    ``,
+    `Ti segnaliamo un nuovo appuntamento.`,
+    ``,
+    `Dettagli appuntamento:`,
+    ``,
+    `Referente: ${r?.referente || ""}`,
+    `Azienda: ${r?.azienda || ""}`,
+    `Giorno: ${fmtDate(r?.data)}`,
+    `Ora: ${r?.ora || ""}`,
+    `Sede: ${r?.indirizzo || ""} - ${r?.città || ""} (${r?.provincia || ""})`,
+    `Telefono: ${r?.telefono || ""}`,
+    `Email Azienda: ${r?.email || ""}`,
+    r?.note ? `Note: ${r.note}` : "",
+    ``,
+    r?.operatore ? `Operatore: ${r.operatore}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const to = "";
+  return { to, subject, body };
+}
+
 /* ─────────────────────────────────────────────────────────── */
 /* Editor (modale)                                             */
 /* ─────────────────────────────────────────────────────────── */
@@ -321,6 +414,23 @@ function Editor({
                     {c}
                   </SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div>
+            <Label>Tipo Appuntamento</Label>
+            <Select
+              value={r.tipoAppuntamento || "In sede"}
+              onValueChange={(v) => updateRow(r.id, { tipoAppuntamento: v })}
+              disabled={locked}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Seleziona tipo appuntamento" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="In sede">In sede</SelectItem>
+                <SelectItem value="Video call">Video call</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -446,6 +556,31 @@ function Editor({
                 <DollarSign className="h-4 w-4" /> Togli fatturato
               </Button>
             )}
+
+            <Button
+              variant="outline"
+              onClick={() => {
+                const { to, subject, body } = makeEmailAzienda(r);
+                openEmail({ to, subject, body });
+              }}
+              className="gap-2"
+              title="Email conferma a azienda"
+            >
+              <Mail className="h-4 w-4" />
+              Email azienda
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                const { to, subject, body } = makeEmailAgente(r);
+                openEmail({ to, subject, body });
+              }}
+              className="gap-2"
+              title="Email notifica a agente"
+            >
+              <Mail className="h-4 w-4" />
+              Email agente
+            </Button>
           </div>
         </div>
       </div>
@@ -1002,7 +1137,7 @@ export default function CofaceAppuntamentiDashboard() {
   const editUnlockedRef = useRef(false);
   function ensureEditPassword() {
     if (editUnlockedRef.current) return true;
-    const pwd = prompt("Modifica protetta.\nInserisci la password:");
+    const pwd = prompt("Modifica protetta.\\nInserisci la password:");
     if (pwd === EDIT_PASSWORD) {
       editUnlockedRef.current = true;
       return true;
@@ -1162,54 +1297,54 @@ export default function CofaceAppuntamentiDashboard() {
     setCreateOpen(true);
   }
 
-  async function handleCreate(form) {
-    const newRow = {
-      id: generateId(),
-      idContaq: form.idContaq || "",
+// dentro CofaceDashboard.jsx
+
+async function handleCreate(f) {
+  try {
+    const supabase = getSupabaseClient();
+
+    const id = generateId();
+    const jsRow = {
+      id,
+      // campi di sistema
       dataInserimento: todayISO(),
       oraInserimento: nowHM(),
-      data: form.data || null,
-      ora: form.ora || "",
-      azienda: form.azienda || "",
-      referente: form.referente || "",
-      telefono: form.telefono || "",
-      email: form.email || "",
-      indirizzo: form.indirizzo || "",
-      citta: form["città"] ?? form.citta ?? "",
-      provincia: form.provincia || "",
-      agente: form.agente || "",
-      operatore: form.operatore || "",
-      cliente: form.cliente || "",
-      stato: form.stato || "programmato",
-      dataAnnullamento: null,
-      note: form.note || "",
-      fatturato: !!form.fatturato,
-      dataFatturazione: null,
-      confermato: false,
-    };
-    try {
-      const { data, error } = await supabase
-        .from("appointments")
-        .insert(rowToDb(newRow))
-        .select("id");
-      if (error) {
-        alert(`Errore creazione: ${error.message}`);
-        return false;
-      }
-      if (!data || data.length === 0) {
-        alert("Permesso negato (RLS)");
-        return false;
-      }
 
-      setRows((prev) => [rowFromDb(newRow), ...prev]);
-      setCreateOpen(false);
-      return true;
-    } catch (e) {
-      console.error(e);
-      alert("Errore imprevisto in creazione.");
-      return false;
-    }
+      // campi del form
+      idContaq: f.idContaq || "",
+      data: f.data || "",
+      ora: f.ora || "",
+      azienda: f.azienda || "",
+      referente: f.referente || "",
+      telefono: f.telefono || "",
+      email: f.email || "",
+      indirizzo: f.indirizzo || "",
+      // ⬇⬇⬇ FIX: assicurati di passare la chiave *accentata* “città”
+      città: f["città"] ?? f.città ?? "",
+      provincia: f.provincia || "",
+      agente: f.agente || "",
+      operatore: f.operatore || "",
+      cliente: f.cliente || "",
+      stato: "programmato",
+      note: f.note || "",
+      fatturato: false,
+    };
+
+    // mappa JS → DB (città → citta) e inserisci
+    const toDb = rowToDb(jsRow); // già presente nel file
+    const { error } = await supabase.from("appointments").insert(toDb);
+    if (error) throw error;
+
+    // aggiorna subito la lista in memoria (mostra “Regione” senza reload)
+    setRows((prev) => [jsRow, ...prev]);
+    return true;
+  } catch (e) {
+    console.error("Create error", e);
+    alert("Errore durante la creazione");
+    return false;
   }
+}
+
 
   async function _updateRow(id, patch) {
     const { data, error } = await supabase
@@ -1280,7 +1415,7 @@ export default function CofaceAppuntamentiDashboard() {
 
   async function clearAll() {
     const pwd = prompt(
-      "ATTENZIONE: eliminerai TUTTI gli appuntamenti.\nInserisci la password per confermare:"
+      "ATTENZIONE: eliminerai TUTTI gli appuntamenti.\\nInserisci la password per confermare:"
     );
     if (pwd !== CLEAR_ALL_PASSWORD) return alert("Password errata. Operazione annullata.");
     if (!confirm("Confermi l'eliminazione definitiva?")) return;
