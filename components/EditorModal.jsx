@@ -1,3 +1,4 @@
+// components/EditorModal.jsx
 "use client";
 
 import React from "react";
@@ -5,9 +6,14 @@ import { Calendar, Check, X, RotateCcw, DollarSign } from "lucide-react";
 import { Button } from "@/components/button";
 import { Input } from "@/components/input";
 import { Label } from "@/components/label";
-import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/select";
+import {
+  Select,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+  SelectValue,
+} from "@/components/select";
 
-// NOTE: questa è la stessa costante usata nel file principale
 const STATUSES = [
   { value: "programmato", label: "Programmato" },
   { value: "svolto", label: "Svolto" },
@@ -15,10 +21,11 @@ const STATUSES = [
   { value: "recuperato", label: "Recuperato" },
 ];
 
-// Helpers locali con fix timezone
 function todayLocalISO() {
   const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate()
+  ).padStart(2, "0")}`;
 }
 function tsFromLocal(dateStr, timeStr) {
   if (!dateStr) return NaN;
@@ -33,11 +40,6 @@ function tsFromLocal(dateStr, timeStr) {
   return new Date(y, mo - 1, d, hh, mm, 0, 0).getTime();
 }
 
-/**
- * EditorModal
- * Estratto in file client separato per eliminare l'errore
- * "Expected static flag was missing".
- */
 export default function EditorModal({
   editing,
   setEditing,
@@ -48,28 +50,26 @@ export default function EditorModal({
   markFatturato,
   unmarkFatturato,
   clientiOpzioni,
-  isAdmin, // ⬅️ ruolo
-  currentOperatorLabel, // ⬅️ etichetta operatore corrente
+  isAdmin,
+  currentOperatorLabel,
 }) {
   if (!editing) return null;
   const r = editing;
   const locked = !!r.fatturato;
 
-  // 15 minuti in ms
   const EDIT_WINDOW_MS = 15 * 60 * 1000;
   const [now, setNow] = React.useState(Date.now());
   React.useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
-
-  // timestamp inserimento (locale)
   const tsInsert = tsFromLocal(r.dataInserimento, r.oraInserimento);
   const remaining = Math.max(0, EDIT_WINDOW_MS - (now - tsInsert));
-  const isOwner = String(r.operatore || "").trim().toLowerCase() === String(currentOperatorLabel || "").trim().toLowerCase();
-  const operatorCanEdit = isOwner && remaining > 0;
 
-  // permesso effettivo in modale
+  const isOwner =
+    String(r.operatore || "").trim().toLowerCase() ===
+    String(currentOperatorLabel || "").trim().toLowerCase();
+  const operatorCanEdit = isOwner && remaining > 0;
   const canUpdate = isAdmin || operatorCanEdit;
 
   const commonInputProps = (k) => ({
@@ -102,7 +102,6 @@ export default function EditorModal({
             <Calendar className="h-5 w-5" />
             <h3 className="font-semibold">Modifica appuntamento</h3>
           </div>
-          {/* Badge permessi & countdown */}
           <div className="text-xs rounded-full px-3 py-1 border bg-gray-50">
             {isAdmin ? (
               <span>Admin • modifica sempre</span>
@@ -115,7 +114,6 @@ export default function EditorModal({
         </div>
 
         <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Inserimento */}
           <div>
             <Label>Data inserimento</Label>
             <Input type="date" value={r.dataInserimento || ""} disabled />
@@ -125,7 +123,6 @@ export default function EditorModal({
             <Input type="time" value={r.oraInserimento || ""} disabled />
           </div>
 
-          {/* Appuntamento */}
           <div>
             <Label>Data appuntamento</Label>
             <Input type="date" {...commonInputProps("data")} />
@@ -153,7 +150,7 @@ export default function EditorModal({
           </div>
 
           <div>
-            <Label>Città</Label>
+            <Label>Regione</Label>
             <Input {...commonInputProps("città")} />
           </div>
           <div>
@@ -174,18 +171,44 @@ export default function EditorModal({
             <Label>Cliente</Label>
             <Select
               value={r.cliente || ""}
-              onValueChange={(v) => canUpdate && updateRow(r.id, { cliente: v })}
+              onValueChange={(v) => {
+                const next = { ...r, cliente: v };
+                setEditing(next);
+                if (canUpdate && !locked) updateRow(r.id, { cliente: v });
+              }}
               disabled={!canUpdate || locked}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Seleziona cliente" />
               </SelectTrigger>
               <SelectContent>
-                {clientiOpzioni.map((c) => (
+                {(clientiOpzioni || []).map((c) => (
                   <SelectItem key={c} value={c}>
                     {c}
                   </SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* ✅ coerente con DB: tipo_appuntamento e token tecnici */}
+          <div>
+            <Label>Tipo appuntamento</Label>
+            <Select
+              value={r.tipo_appuntamento || ""}
+              onValueChange={(v) => {
+                const next = { ...r, tipo_appuntamento: v };
+                setEditing(next);
+                if (canUpdate && !locked) updateRow(r.id, { tipo_appuntamento: v });
+              }}
+              disabled={!canUpdate || locked}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Seleziona tipo appuntamento" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="in_sede">In sede</SelectItem>
+                <SelectItem value="videocall">Videocall</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -199,7 +222,11 @@ export default function EditorModal({
             <Label>Stato</Label>
             <Select
               value={r.stato}
-              onValueChange={(v) => canUpdate && updateRow(r.id, { stato: v })}
+              onValueChange={(v) => {
+                const next = { ...r, stato: v };
+                setEditing(next);
+                if (isAdmin && !locked) updateRow(r.id, { stato: v });
+              }}
               disabled={!isAdmin || locked}
             >
               <SelectTrigger>
@@ -229,19 +256,18 @@ export default function EditorModal({
             <Label>Note</Label>
             <Input {...commonInputProps("note")} />
           </div>
+
           <div className="md:col-span-2">
             <Label>Indirizzo (solo interno)</Label>
             <Input {...commonInputProps("indirizzo")} />
           </div>
         </div>
 
-        {/* Footer */}
         <div className="p-4 border-t flex flex-wrap items-center justify-between gap-2">
           <div className="text-sm opacity-70">
             ID: {r.id} {r.fatturato ? "• FATTURATO" : ""}
           </div>
 
-          {/* Bottoni di stato – solo admin */}
           {isAdmin && (
             <div className="flex gap-2">
               <Button
@@ -260,11 +286,7 @@ export default function EditorModal({
                 variant="outline"
                 onClick={() => {
                   markAnnullato(r);
-                  setEditing({
-                    ...r,
-                    stato: "annullato",
-                    dataAnnullamento: todayLocalISO(),
-                  });
+                  setEditing({ ...r, stato: "annullato", dataAnnullamento: todayLocalISO() });
                 }}
                 className="gap-2"
                 disabled={locked}
@@ -288,11 +310,7 @@ export default function EditorModal({
                 <Button
                   onClick={() => {
                     markFatturato(r);
-                    setEditing({
-                      ...r,
-                      fatturato: true,
-                      dataFatturazione: todayLocalISO(),
-                    });
+                    setEditing({ ...r, fatturato: true, dataFatturazione: todayLocalISO() });
                   }}
                   className="gap-2"
                 >
@@ -303,11 +321,7 @@ export default function EditorModal({
                   variant="secondary"
                   onClick={() => {
                     unmarkFatturato(r);
-                    setEditing({
-                      ...r,
-                      fatturato: false,
-                      dataFatturazione: "",
-                    });
+                    setEditing({ ...r, fatturato: false, dataFatturazione: "" });
                   }}
                   className="gap-2"
                 >

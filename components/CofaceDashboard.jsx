@@ -1,3 +1,4 @@
+// components/CofaceDashboard.jsx
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -35,6 +36,9 @@ import LogoutButton from "@/components/LogoutButton";
 // Supabase client lato browser
 import { getSupabaseClient } from "@/lib/supabaseClient";
 import CreateAppointmentModal from "@/components/CreateAppointmentModal";
+
+import AGENT_EMAILS_FULL from "@/data/agent_emails_full.json";
+
 /* ────────────────────────────────────────────────────────────── */
 /* Costanti / util                                                */
 /* ────────────────────────────────────────────────────────────── */
@@ -75,7 +79,6 @@ function parseExcelDate(v) {
   if (v == null || v === "") return "";
   if (typeof v === "number") return XLSX.SSF.format("yyyy-mm-dd", v);
   if (v instanceof Date) return dateToLocalISO(v);
-  // <-- locale
   if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
   const m = String(v).match(/(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})/);
   if (m) {
@@ -86,7 +89,7 @@ function parseExcelDate(v) {
     return `${yyyy}-${mm}-${dd}`;
   }
   const d = new Date(v);
-  if (!isNaN(+d)) return dateToLocalISO(d); // <-- locale
+  if (!isNaN(+d)) return dateToLocalISO(d);
   return "";
 }
 function parseExcelTime(v) {
@@ -168,18 +171,21 @@ function generateId() {
 
 /* mapping JS <-> DB */
 function rowFromDb(db) {
-  return { ...db, città: db.citta ?? "" };
+  return {
+    ...db,
+    // UI: "città" (accentata) ←→ DB: citta
+    città: db.citta ?? "",
+    // UI espone direttamente la chiave DB corretta (niente camel)
+    tipo_appuntamento: db.tipo_appuntamento ?? db.tipoappuntamento ?? null,
+  };
 }
 const toNull = (v) => (v === "" || v === undefined ? null : v);
+// mappa solo i campi speciali; il resto passa così com'è
 function rowToDb(js) {
-  const { città, ...rest } = js || {};
+  const { città, tipoAppuntamento, ...rest } = js || {}; // scarta eventuale camel
   return {
-    ...rest,
-    citta: città ?? "",
-    dataInserimento: toNull(rest.dataInserimento),
-    data: toNull(rest.data),
-    dataAnnullamento: toNull(rest.dataAnnullamento),
-    dataFatturazione: toNull(rest.dataFatturazione),
+    ...rest,             // include tipo_appuntamento se presente
+    citta: città ?? "",  // mapping UI->DB
   };
 }
 
@@ -207,96 +213,197 @@ const DEFAULT_HEADERS = [
   "Fatturato",
   "Data Fatturazione",
 ];
+/* ────────────────────────────────────────────────────────────── */
+/* EMAIL UTILS — forza sempre Gmail Web (niente prompt di sistema) */
+/* ────────────────────────────────────────────────────────────── */
 
-// --- EMAIL UTILS (Gmail compose con fallback mailto) ---
-function gmailComposeURL({
-  to,
-  cc,
-  bcc,
-  subject,
-  body,
-}) {
+function joinEmails(v) {
+  if (!v) return "";
+  return Array.isArray(v) ? v.filter(Boolean).map(String).join(",") : String(v);
+}
+
+/** Gmail compose compatibile (u/0 = account primario; tf=cm funziona meglio con CC/BCC) */
+function gmailComposeUrl({ to, cc, bcc, subject, body }) {
   const enc = encodeURIComponent;
-  const arr = (v) =>
-    !v ? "" : Array.isArray(v) ? v.join(",") : v;
+  const base = "https://mail.google.com/mail/u/0/?view=cm&fs=1&tf=cm";
+  const toStr  = joinEmails(to);
+  const ccStr  = joinEmails(cc);
+  const bccStr = joinEmails(bcc);
 
-  const base = "https://mail.google.com/mail/?view=cm&fs=1&tf=1";
-  const url =
-    `${base}` +
-    `&to=${enc(arr(to))}` +
-    (cc ? `&cc=${enc(arr(cc))}` : "") +
-    (bcc ? `&bcc=${enc(arr(bcc))}` : "") +
-    `&su=${enc(subject)}` +
-    `&body=${enc(body)}`;
+  let url = `${base}&to=${enc(toStr)}`;
+  if (ccStr)  url += `&cc=${enc(ccStr)}`;
+  if (bccStr) url += `&bcc=${enc(bccStr)}`;
+  if (subject) url += `&su=${enc(subject)}`;
+  if (body)    url += `&body=${enc(body)}`;
   return url;
 }
 
-function openEmail(params) {
-  const url = gmailComposeURL(params);
-  const w = window.open(url, "_blank");
-  if (!w || w.closed || typeof w.closed === "undefined") {
+/** build mailto: (usato solo per il fallback “ufficiale” di Gmail) */
+function mailtoUrl({ to, cc, bcc, subject, body }) {
+  const enc = encodeURIComponent;
+  const toStr  = joinEmails(to);
+  const ccStr  = joinEmails(cc);
+  const bccStr = joinEmails(bcc);
+
+  const parts = [];
+  if (subject) parts.push(`subject=${enc(subject)}`);
+  if (body)    parts.push(`body=${enc(body)}`);
+  if (ccStr)   parts.push(`cc=${enc(ccStr)}`);
+  if (bccStr)  parts.push(`bcc=${enc(bccStr)}`);
+
+  return `mailto:${toStr}${parts.length ? "?" + parts.join("&") : ""}`;
+}
+
+/**
+ * Apre SEMPRE Gmail Web nella stessa tab con To/CC/BCC/Subject/Body.
+ * Se il primo compose ignora CC/BCC (alcuni tenant/policy), dopo 250ms
+ * forza il percorso ufficiale Gmail che converte un mailto in compose
+ * preservando i campi.
+ */
+function openEmail({ to, cc, bcc, subject, body }) {
+  try {
+    const urlG = gmailComposeUrl({ to, cc, bcc, subject, body });
+    window.location.assign(urlG);
+
+    // Fallback “ufficiale” Gmail (conversione mailto→compose)
+    setTimeout(() => {
+      const mailto = mailtoUrl({ to, cc, bcc, subject, body });
+      const enc = encodeURIComponent;
+      const gmailConvert = `https://mail.google.com/mail/u/0/?extsrc=mailto&url=${enc(mailto)}`;
+      window.location.assign(gmailConvert);
+    }, 250);
+  } catch {
+    // Estremo: prova direttamente la conversione mailto→compose
+    const mailto = mailtoUrl({ to, cc, bcc, subject, body });
     const enc = encodeURIComponent;
-    const subject = enc(params.subject);
-    const body = enc(params.body);
-    const to = Array.isArray(params.to) ? params.to.join(",") : params.to;
-    window.location.href = `mailto:${to}?subject=${subject}&body=${body}`;
+    window.location.assign(`https://mail.google.com/mail/u/0/?extsrc=mailto&url=${enc(mailto)}`);
   }
 }
 
-function makeEmailAzienda(r) {
-  const when = `${r?.data || ""} ${r?.ora || ""}`.trim();
-  const subject = `Conferma appuntamento ${r?.azienda ?? ""} – ${when}`;
-  const body = [
-    `Buongiorno ${r?.referente || ""},`,
-    ``,
-    `confermiamo l’appuntamento fissato per ${when}.`,
-    r?.agente ? `Agente incaricato: ${r.agente}.` : "",
-    r?.indirizzo ? `Indirizzo: ${r.indirizzo}.` : "",
-    ``,
-    `Riepilogo:`,
-    `• Azienda: ${r?.azienda || ""}`,
-    `• Referente: ${r?.referente || ""}`,
-    `• Telefono: ${r?.telefono || ""}`,
-    `• Email: ${r?.email || ""}`,
-    `• Regione: ${r?.città || ""}`,
-    r?.note ? `• Note: ${r.note}` : "",
-    ``,
-    `Grazie,`,
-    `Team Coface`,
-  ]
-    .filter(Boolean)
-    .join("\n");
+/* ────────────────────────────────────────────────────────────── */
+/* Helper tipo appuntamento + lookup email agente                 */
+/* ────────────────────────────────────────────────────────────── */
 
-  const to = r?.email || "";
-  return { to, subject, body };
+function tipoLabel(r) {
+  const t = r?.tipo_appuntamento;
+  if (t === "in_sede") return "in sede";
+  if (t === "videocall") return "videocall";
+  return "";
 }
 
+/** normalizza un nome rimuovendo accenti, doppie spaziature e portando a lowercase */
+function normalizeName(s) {
+  return String(s || "")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\p{L}\p{N}\s.']/gu, " ")
+    .replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+/** genera alcune varianti utili per matching (nome cognome, solo cognome, iniziali, senza spazi) */
+function nameVariants(fullName) {
+  const norm = normalizeName(fullName);
+  if (!norm) return [];
+  const parts = norm.split(" ");
+  const name = parts[0] || "";
+  const surname = parts[parts.length - 1] || "";
+  const initials = (name && surname) ? `${name[0]}.${surname}` : "";
+  return Array.from(new Set([
+    norm,                      // "mario rossi"
+    surname,                   // "rossi"
+    initials,                  // "m.rossi"
+    norm.replace(/\s+/g, ""),  // "mariorossi"
+  ].filter(Boolean)));
+}
+
+/** costruisce indice {variante -> email} a partire dal JSON Nome Cognome -> email */
+function buildAgentIndex(mapFull) {
+  const idx = {};
+  for (const [full, email] of Object.entries(mapFull || {})) {
+    for (const v of nameVariants(full)) {
+      if (!idx[v]) idx[v] = email;
+    }
+  }
+  return idx;
+}
+
+const AGENT_EMAIL_INDEX = buildAgentIndex(AGENT_EMAILS_FULL);
+
+/** ritorna l’email dell’agente scritto nel record appuntamento (accetta Nome Cognome, solo cognome, ecc.) */
+function getAgentEmail(r) {
+  const raw = String(r?.agente || "").trim();
+  if (!raw) return "";
+  const norm = normalizeName(raw);
+
+  // 1) match diretto sul Nome Cognome
+  for (const [full, email] of Object.entries(AGENT_EMAILS_FULL)) {
+    if (normalizeName(full) === norm) return email;
+  }
+  // 2) varianti (cognome, m.cognome, senza spazi, ecc.)
+  return AGENT_EMAIL_INDEX[norm] || "";
+}
+
+/* ────────────────────────────────────────────────────────────── */
+/* Template email                                                 */
+/* ────────────────────────────────────────────────────────────── */
 function makeEmailAgente(r) {
-  const when = `${r?.data || ""} ${r?.ora || ""}`.trim();
-  const subject = `Nuovo appuntamento – ${r?.azienda ?? ""} – ${when}`;
+  const dataGGMM = fmtDate(r?.data);
+  const subject = `Notifica appuntamento Coface - ${dataGGMM} alle ore ${r?.ora || ""} - ${r?.azienda || ""}`;
   const body = [
     `Gentile ${r?.agente || ""},`,
     ``,
-    `Ti segnaliamo un nuovo appuntamento.`,
+    `abbiamo fissato un appuntamento ${tipoLabel(r)} per il giorno ${dataGGMM} alle ore ${r?.ora || ""}.`,
     ``,
-    `Dettagli appuntamento:`,
+    `Azienda: ${r?.azienda || ""}`,
+    `Indirizzo: ${r?.indirizzo || ""} - ${r?.provincia || ""}`,
     ``,
     `Referente: ${r?.referente || ""}`,
-    `Azienda: ${r?.azienda || ""}`,
-    `Giorno: ${fmtDate(r?.data)}`,
-    `Ora: ${r?.ora || ""}`,
-    `Sede: ${r?.indirizzo || ""} - ${r?.città || ""} (${r?.provincia || ""})`,
     `Telefono: ${r?.telefono || ""}`,
-    `Email Azienda: ${r?.email || ""}`,
-    r?.note ? `Note: ${r.note}` : "",
+    `EMAIL: ${r?.email || ""}`,
     ``,
-    r?.operatore ? `Operatore: ${r.operatore}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
+    `NOTE: ${r?.note || ""}`,
+    ``,
+    `Buon lavoro`,
+    `${r?.operatore || ""}`,
+  ].join("\n");
 
-  const to = "";
-  return { to, subject, body };
+  const to = getAgentEmail(r) || "";
+  const cc = ["arturo.antacido@coface.com"];
+  const bcc = ["tlcoface@contaq.it"];
+
+  return { to, cc, bcc, subject, body };
+}
+
+function makeEmailAzienda(r) {
+  const dataGGMM = fmtDate(r?.data); // formato gg/mm/aaaa
+  const subject = `Conferma appuntamento Coface - ${dataGGMM} alle ore ${r?.ora || ""} - ${r?.azienda || ""}`;
+  const body = [
+    `Gentile  ${r?.referente || ""},`,
+    ``,
+    `La presente per confermare l' appuntamento ${tipoLabel(r)}, per il giorno ${dataGGMM} alle ore ${r?.ora || ""} con il nostro Sales Account ${r?.agente || ""}`,
+    ``,
+    `Di seguito una breve sintesi delle soluzioni COFACE che permettono di:`,
+    ``,
+    `- Richiedere informazioni complete in tutto il mondo in tempo reale utili per chi fa export, a condizioni molto competitive`,
+    `- Confrontare i fidi dei provider di informazioni con quelli assicurativi Coface`,
+    `- Sapere se i clienti hanno avuto sinistri o sono assicurati`,
+    `- Conoscere il fido assicurativo e monitorarlo per essere tempestivamente avvisati in caso di revoca fidi Valutare i fidi e affidabilità dei fornitori strategici in Italia e nel mondo`,
+    ``,
+    `Sarà nostra cura contattarla qualche giorno prima per confermare o riprogrammare la data dell'incontro.`,
+    ``,
+    `La ringraziamo per il tempo che ci ha dedicato e le inviamo un cordiale saluto.`,
+    ``,
+    `${r?.operatore || ""}`,
+    ``,
+    `Customer Success Specialist`,
+    ``,
+    `Numero Verde: 800 600 880`,
+  ].join("\n");
+
+  const to = r?.email || ""; // email azienda dal record
+  const cc = [getAgentEmail(r), "arturo.antacido@coface.com"].filter(Boolean);
+  const bcc = ["tlcoface@contaq.it"];
+
+  return { to, cc, bcc, subject, body };
 }
 
 /* ─────────────────────────────────────────────────────────── */
@@ -418,19 +525,23 @@ function Editor({
             </Select>
           </div>
 
+          {/* ✅ Tipo appuntamento con token corretti + setEditing */}
           <div>
-            <Label>Tipo Appuntamento</Label>
+            <Label>Tipo appuntamento</Label>
             <Select
-              value={r.tipoAppuntamento || "In sede"}
-              onValueChange={(v) => updateRow(r.id, { tipoAppuntamento: v })}
+              value={r.tipo_appuntamento || ""}
+              onValueChange={(v) => {
+                setEditing({ ...r, tipo_appuntamento: v });
+                updateRow(r.id, { tipo_appuntamento: v });
+              }}
               disabled={locked}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Seleziona tipo appuntamento" />
+                <SelectValue placeholder="Seleziona" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="In sede">In sede</SelectItem>
-                <SelectItem value="Video call">Video call</SelectItem>
+                <SelectItem value="in_sede">In sede</SelectItem>
+                <SelectItem value="videocall">Videocall</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -560,8 +671,8 @@ function Editor({
             <Button
               variant="outline"
               onClick={() => {
-                const { to, subject, body } = makeEmailAzienda(r);
-                openEmail({ to, subject, body });
+                const { to, cc, bcc, subject, body } = makeEmailAzienda(r);
+                openEmail({ to, cc, bcc, subject, body });
               }}
               className="gap-2"
               title="Email conferma a azienda"
@@ -572,8 +683,8 @@ function Editor({
             <Button
               variant="outline"
               onClick={() => {
-                const { to, subject, body } = makeEmailAgente(r);
-                openEmail({ to, subject, body });
+                const { to, cc, bcc, subject, body } = makeEmailAgente(r);
+                openEmail({ to, cc, bcc, subject, body });
               }}
               className="gap-2"
               title="Email notifica a agente"
@@ -1040,7 +1151,6 @@ function OperatorStatsCard({ rowsAll, rowsFiltered, creators }) {
 /* Nuova card: Statistiche per giorno di inserimento              */
 /* ────────────────────────────────────────────────────────────── */
 function InsertionStatsCard({ rows }) {
-  // prendi gli ultimi 30 giorni PRESENTI (date distinte su dataInserimento)
   const last30Dates = React.useMemo(() => {
     const set = new Set(
       rows
@@ -1058,7 +1168,6 @@ function InsertionStatsCard({ rows }) {
       if (!d || !last30Dates.includes(d)) continue;
       map.set(d, (map.get(d) || 0) + 1);
     }
-    // ordina per data crescente e poi mappa in {label,value}
     return last30Dates.map((d) => ({
       label: d.split("-").reverse().join("/"),
       value: map.get(d) || 0,
@@ -1137,7 +1246,7 @@ export default function CofaceAppuntamentiDashboard() {
   const editUnlockedRef = useRef(false);
   function ensureEditPassword() {
     if (editUnlockedRef.current) return true;
-    const pwd = prompt("Modifica protetta.\\nInserisci la password:");
+    const pwd = prompt("Modifica protetta.\nInserisci la password:");
     if (pwd === EDIT_PASSWORD) {
       editUnlockedRef.current = true;
       return true;
@@ -1164,6 +1273,7 @@ export default function CofaceAppuntamentiDashboard() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [createOpen, setCreateOpen] = useState(false);
+
   // Primo fetch (pubblico) + realtime
   useEffect(() => {
     let mounted = true;
@@ -1206,6 +1316,7 @@ export default function CofaceAppuntamentiDashboard() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
   /* ✅ AUTO: imposta "svolto" dopo 3 giorni dalla data appuntamento (se non già svolto/annullato) */
   const autoRunRef = useRef(false);
   useEffect(() => {
@@ -1234,6 +1345,7 @@ export default function CofaceAppuntamentiDashboard() {
     autoRunRef.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows]);
+
   /* liste dinamiche */
   const agents = useMemo(
     () => ["tutti", ...Array.from(new Set(rows.map((r) => r.agente).filter(Boolean))).sort((a, b) => a.localeCompare(b))],
@@ -1247,6 +1359,7 @@ export default function CofaceAppuntamentiDashboard() {
     () => ["tutti", ...Array.from(new Set([...CLIENTI_CANONICI, ...rows.map((r) => r.cliente).filter(Boolean)]))],
     [rows]
   );
+
   /* filtra + ordina */
   const filtered = useMemo(() => {
     let out = rows;
@@ -1280,10 +1393,12 @@ export default function CofaceAppuntamentiDashboard() {
       return sortDir === "asc" ? aKey - bKey : bKey - aKey;
     });
   }, [rows, agent, creator, client, status, dayAppFrom, dayAppTo, dayInsFrom, dayInsTo, q, sortBy, sortDir]);
+
   /* paginazione */
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize);
   useEffect(() => { if (page > totalPages) setPage(1); }, [totalPages, page]);
+
   /* KPI */
   const kpis = useMemo(() => {
     const base = { programmato: 0, svolto: 0, annullato: 0, recuperato: 0 };
@@ -1292,59 +1407,48 @@ export default function CofaceAppuntamentiDashboard() {
     const fatturati = filtered.filter((r) => r.fatturato).length;
     return { ...base, fatturabili, fatturati, totale: filtered.length };
   }, [filtered]);
+
   /* CRUD (DB) */
   function addEmptyRow() {
     setCreateOpen(true);
   }
 
-// dentro CofaceDashboard.jsx
+  // Inserisce un nuovo appuntamento su Supabase e aggiorna la tabella locale
+  async function handleCreate(form) {
+    try {
+      const supabase = getSupabaseClient();
+      const id = generateId();
 
-async function handleCreate(f) {
-  try {
-    const supabase = getSupabaseClient();
+      const jsRow = {
+        id,
+        dataInserimento: todayISO(),
+        oraInserimento: nowHM(),
 
-    const id = generateId();
-    const jsRow = {
-      id,
-      // campi di sistema
-      dataInserimento: todayISO(),
-      oraInserimento: nowHM(),
+        // prendi tutto dal form (include tipo_appuntamento)
+        ...form,
 
-      // campi del form
-      idContaq: f.idContaq || "",
-      data: f.data || "",
-      ora: f.ora || "",
-      azienda: f.azienda || "",
-      referente: f.referente || "",
-      telefono: f.telefono || "",
-      email: f.email || "",
-      indirizzo: f.indirizzo || "",
-      // ⬇⬇⬇ FIX: assicurati di passare la chiave *accentata* “città”
-      città: f["città"] ?? f.città ?? "",
-      provincia: f.provincia || "",
-      agente: f.agente || "",
-      operatore: f.operatore || "",
-      cliente: f.cliente || "",
-      stato: "programmato",
-      note: f.note || "",
-      fatturato: false,
-    };
+        // normalizzazioni minime
+        città: form["città"] ?? form.citta ?? "",
+        data: form.data || null,
+        stato: form.stato || "programmato",
+        fatturato: !!form.fatturato,
 
-    // mappa JS → DB (città → citta) e inserisci
-    const toDb = rowToDb(jsRow); // già presente nel file
-    const { error } = await supabase.from("appointments").insert(toDb);
-    if (error) throw error;
+        // se l’utente non sceglie niente, salva null
+        tipo_appuntamento: form.tipo_appuntamento || null,
+      };
 
-    // aggiorna subito la lista in memoria (mostra “Regione” senza reload)
-    setRows((prev) => [jsRow, ...prev]);
-    return true;
-  } catch (e) {
-    console.error("Create error", e);
-    alert("Errore durante la creazione");
-    return false;
+      const payload = rowToDb(jsRow); // mappa solo “città” -> citta
+      const { error } = await supabase.from("appointments").insert(payload);
+      if (error) throw error;
+
+      setRows((prev) => [jsRow, ...prev]);
+      return true;
+    } catch (e) {
+      console.error("Create error", e?.message || e);
+      alert("Errore durante la creazione");
+      return false;
+    }
   }
-}
-
 
   async function _updateRow(id, patch) {
     const { data, error } = await supabase
@@ -1369,7 +1473,7 @@ async function handleCreate(f) {
     return _updateRow(id, patch);
   }
   
-  async function updateConfirmed(r) {
+   async function updateConfirmed(r) {
     const patch = { confermato: !r.confermato };
     const { data, error } = await supabase
       .from("appointments")
@@ -1415,7 +1519,7 @@ async function handleCreate(f) {
 
   async function clearAll() {
     const pwd = prompt(
-      "ATTENZIONE: eliminerai TUTTI gli appuntamenti.\\nInserisci la password per confermare:"
+      "ATTENZIONE: eliminerai TUTTI gli appuntamenti.\nInserisci la password per confermare:"
     );
     if (pwd !== CLEAR_ALL_PASSWORD) return alert("Password errata. Operazione annullata.");
     if (!confirm("Confermi l'eliminazione definitiva?")) return;
@@ -1618,6 +1722,11 @@ async function handleCreate(f) {
       recuperato: "bg-amber-50 text-amber-700 border-amber-200",
     }[r.stato] || "";
 
+    const tipoLabel =
+      r.tipo_appuntamento === "in_sede" ? "In sede" :
+      r.tipo_appuntamento === "videocall" ? "Videocall" :
+      "—";
+
     return (
       <tr className="border-b hover:bg-gray-50">
         <td className="p-2 font-mono text-xs opacity-60">
@@ -1643,6 +1752,8 @@ async function handleCreate(f) {
         </td>
         <td className="p-2">{r.cliente || <span className="opacity-50">—</span>}</td>
         <td className="p-2">{r.agente}</td>
+        {/* ✅ Nuova colonna Tipo */}
+        <td className="p-2">{tipoLabel}</td>
         <td className="p-2">
           <span className={`text-xs px-2 py-1 rounded-full border ${statusBadge}`}>
             {STATUSES.find((s) => s.value === r.stato)?.label}
@@ -1817,7 +1928,7 @@ async function handleCreate(f) {
                 value={sortBy}
                 onValueChange={(v) => { setSortBy(v); setPage(1); }}
               >
-                <SelectTrigger className="w-[220px]">
+                <SelectTrigger className="w:[220px] md:w-[220px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1829,7 +1940,7 @@ async function handleCreate(f) {
                 value={sortDir}
                 onValueChange={(v) => { setSortDir(v); setPage(1); }}
               >
-                <SelectTrigger className="w-[160px]">
+                <SelectTrigger className="w:[160px] md:w-[160px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1853,6 +1964,8 @@ async function handleCreate(f) {
                   <th className="p-2">Luogo</th>
                   <th className="p-2">Cliente</th>
                   <th className="p-2">Agente</th>
+                  {/* ✅ nuova colonna visibile */}
+                  <th className="p-2">Tipo</th>
                   <th className="p-2">Stato</th>
                   {/* ✅ header sticky allineato alla colonna azioni */}
                   <th className="p-2 sticky right-0 bg-white z-20 w-[200px] shadow-[inset_8px_0_8px_-8px_rgba(0,0,0,0.12)]">
@@ -1864,7 +1977,7 @@ async function handleCreate(f) {
                 {pageRows.map((r) => (<Row key={r.id} r={r} />))}
                 {pageRows.length === 0 && (
                   <tr>
-                    <td colSpan={10} className="p-6 text-center text-sm opacity-60">
+                    <td colSpan={11} className="p-6 text-center text-sm opacity-60">
                       Nessun risultato
                     </td>
                   </tr>
