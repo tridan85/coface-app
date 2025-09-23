@@ -1248,12 +1248,251 @@ function OperatorStatsCard({ rowsAll, rowsFiltered, creators }) {
 }
 
 /* ────────────────────────────────────────────────────────────── */
-/* Nuova card: Statistiche per giorno di inserimento              */
+/* Leaderboard Operatori – stile infografica                      */
+/*  - Mese/Anno                                                   */
+/*  - Target dinamico (15/mese)                                   */
+/*  - % annullati con legenda colori                              */
+/*  - “Mostra tutti” (>=1 appuntamento)                           */
+/* ────────────────────────────────────────────────────────────── */
+function OperatorLeaderboardProCard({ rows, monthTarget = 15 }) {
+  // UI
+  const [mode, setMode] = React.useState("month"); // "month" | "year"
+  const [showAll, setShowAll] = React.useState(false);
+
+  // helpers data
+  const pad = (n) => String(n).padStart(2, "0");
+  const now = new Date();
+  const currentYM = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
+  const currentY  = `${now.getFullYear()}`;
+
+  // filtro periodo
+  const rowsPeriod = React.useMemo(() => {
+    const src = Array.isArray(rows) ? rows : [];
+    if (mode === "month") return src.filter(r => r.dataInserimento?.slice(0,7) === currentYM);
+    return src.filter(r => r.dataInserimento?.slice(0,4) === currentY);
+  }, [rows, mode, currentYM, currentY]);
+
+  // aggregazione per operatore
+  const aggregated = React.useMemo(() => {
+    const map = new Map();
+    for (const r of rowsPeriod) {
+      const key = (r.operatore || "—").toLowerCase();
+      const prev = map.get(key) || { op: key, count: 0, cancelled: 0 };
+      prev.count += 1;
+      if ((r.stato || "").toLowerCase() === "annullato") prev.cancelled += 1;
+      map.set(key, prev);
+    }
+    return Array.from(map.values()).sort((a, b) => b.count - a.count || a.op.localeCompare(b.op));
+  }, [rowsPeriod]);
+
+  const leader = aggregated[0]?.count || 0;
+  const annualTarget = monthTarget * (now.getMonth() + 1);
+  const target = mode === "month" ? monthTarget : annualTarget;
+
+  // util
+  const pct = (num, den) => (den > 0 ? Math.min(100, Math.round((num / den) * 100)) : 0);
+  const dispName = (s) => s.split(" ").map(x => x ? x[0].toUpperCase()+x.slice(1) : x).join(" ");
+
+  // selezione righe da mostrare
+  const list = React.useMemo(() => {
+    const base = showAll ? aggregated.filter(x => x.count > 0) : aggregated.slice(0, 10);
+    return base.map((row, i) => {
+      const cancelRate = row.count ? Math.round((row.cancelled / row.count) * 100) : 0;
+      const progressLeader = pct(row.count, Math.max(1, leader));
+      const progressTarget = pct(row.count, target);
+      return { ...row, rank: i + 1, cancelRate, progressLeader, progressTarget };
+    });
+  }, [aggregated, showAll, leader, target]);
+
+  // riepilogo a destra
+  const summary = React.useMemo(() => {
+    const tot = aggregated.reduce((s, x) => s + x.count, 0);
+    const ann = aggregated.reduce((s, x) => s + x.cancelled, 0);
+    const avg = aggregated.length ? (tot / aggregated.length) : 0;
+    return {
+      tot,
+      ann,
+      annRate: tot ? Math.round((ann / tot) * 100) : 0,
+      avg: Math.round(avg * 10) / 10,
+    };
+  }, [aggregated]);
+
+  const title =
+    mode === "month"
+      ? `🏆 Classifica Operatori – ${pad(now.getMonth() + 1)}/${String(now.getFullYear()).slice(2)}`
+      : `🏆 Classifica Operatori – ${now.getFullYear()}`;
+
+  // colore barra per % annullati
+  const barClass = (rate) =>
+    rate >= 25 ? "bg-rose-500"
+    : rate >= 10 ? "bg-amber-500"
+    : "bg-emerald-600";
+
+  // riga operatore
+  const BarRow = ({ row }) => {
+    const medal = row.rank === 1 ? "🥇" : row.rank === 2 ? "🥈" : row.rank === 3 ? "🥉" : `${row.rank}.`;
+    return (
+      <div className="grid grid-cols-12 gap-3 items-center">
+        {/* col 1–5: nome + medaglia */}
+        <div className="col-span-12 md:col-span-5 min-w-0">
+          <div className="flex items-center gap-2">
+            <div className="w-8 text-center text-lg">{medal}</div>
+            <div className="font-medium truncate">{dispName(row.op)} {row.rank === 1 && <span>👑</span>}</div>
+          </div>
+        </div>
+
+        {/* col 6–10: barra orizzontale vs leader */}
+        <div className="col-span-12 md:col-span-5">
+          <div className="h-3 bg-gray-200 rounded-full overflow-hidden" title={`${row.count} appuntamenti • ${row.cancelRate}% annullati`}>
+            <div className={`h-3 ${barClass(row.cancelRate)}`} style={{ width: `${row.progressLeader}%` }} />
+          </div>
+          <div className="flex justify-between text-[11px] text-gray-500 mt-1">
+            <span>vs leader</span>
+            <span>{row.progressLeader}% • {leader - row.count > 0 ? `-${leader - row.count}` : "pari!"}</span>
+          </div>
+        </div>
+
+        {/* col 11–12: numeri */}
+        <div className="col-span-12 md:col-span-2 flex md:block justify-between md:justify-end text-sm">
+          <div className="font-semibold">{row.count}</div>
+          <div className={`ml-4 md:ml-0 ${row.cancelRate>=25 ? "text-rose-600" : row.cancelRate>=10 ? "text-amber-600" : "text-emerald-600"}`}>
+            {row.cancelRate}%
+          </div>
+        </div>
+
+        {/* barra “obiettivo” */}
+        <div className="col-span-12">
+          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+            <div className="h-2 bg-sky-600" style={{ width: `${row.progressTarget}%` }} />
+          </div>
+          <div className="flex justify-between text-[11px] text-gray-500 mt-1">
+            <span>Obiettivo ({target})</span>
+            <span>{row.progressTarget}% • {row.count < target ? `${target - row.count} al target` : "target OK!"}</span>
+          </div>
+        </div>
+
+        <div className="col-span-12 border-b" />
+      </div>
+    );
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <CardTitle>{title}</CardTitle>
+            <div className="text-xs text-gray-500 mt-1">
+              {mode === "month"
+                ? `Target: ${monthTarget} appuntamenti per operatore nel mese`
+                : `Target cumulativo: ${annualTarget} al ${pad(now.getMonth()+1)}/${now.getFullYear()}`}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              className={`px-3 py-1 text-sm rounded-full border ${mode==="month" ? "bg-gray-900 text-white" : "bg-white"}`}
+              onClick={() => setMode("month")}
+            >
+              Mese
+            </button>
+            <button
+              className={`px-3 py-1 text-sm rounded-full border ${mode==="year" ? "bg-gray-900 text-white" : "bg-white"}`}
+              onClick={() => setMode("year")}
+            >
+              Anno
+            </button>
+            <button
+              className="px-3 py-1 text-sm rounded-full border"
+              onClick={() => setShowAll(s => !s)}
+              title="Mostra anche gli operatori con ≥1 appuntamento"
+            >
+              {showAll ? "Top 10" : "Mostra tutti"}
+            </button>
+          </div>
+        </div>
+      </CardHeader>
+
+      <CardContent>
+        {aggregated.length === 0 ? (
+          <div className="text-sm text-gray-500">Nessun inserimento nel periodo selezionato.</div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6">
+            {/* elenco (bar chart orizzontale) */}
+            <div className="space-y-3">
+              {/* intestazione compatta */}
+              <div className="hidden md:grid grid-cols-12 text-[11px] text-gray-500 px-1">
+                <span className="col-span-5">Operatore</span>
+                <span className="col-span-5">Barra vs leader</span>
+                <span className="col-span-2 text-right pr-2">Appt • % ann.</span>
+              </div>
+
+              <div className="space-y-4">
+                {list.map((row) => (<BarRow key={row.op} row={row} />))}
+              </div>
+            </div>
+
+            {/* pannello di riepilogo / legenda */}
+            <div className="rounded-xl border p-4 bg-white h-max">
+              <div className="text-sm font-medium mb-2">Riepilogo</div>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="rounded-lg border p-3">
+                  <div className="text-[11px] text-gray-500">Totale inserimenti</div>
+                  <div className="text-lg font-semibold">{summary.tot}</div>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <div className="text-[11px] text-gray-500">% annullati (globale)</div>
+                  <div className={`text-lg font-semibold ${summary.annRate>=25 ? "text-rose-600" : summary.annRate>=10 ? "text-amber-600" : "text-emerald-600"}`}>
+                    {summary.annRate}%
+                  </div>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <div className="text-[11px] text-gray-500">Media appt / operatore</div>
+                  <div className="text-lg font-semibold">{summary.avg}</div>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <div className="text-[11px] text-gray-500">Leader (appt)</div>
+                  <div className="text-lg font-semibold">{leader}</div>
+                </div>
+              </div>
+
+              <div className="mt-4 text-sm">
+                <div className="text-[11px] text-gray-500 mb-1">Legenda % annullati</div>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-block w-3 h-3 rounded-full bg-emerald-600" />
+                    <span className="text-sm">0–9% (buono)</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-block w-3 h-3 rounded-full bg-amber-500" />
+                    <span className="text-sm">10–24% (attenzione)</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-block w-3 h-3 rounded-full bg-rose-500" />
+                    <span className="text-sm">≥25% (critico)</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 text-[11px] text-gray-500">
+                Le barre principali misurano il progresso **vs leader**; la barra azzurra indica il **progresso verso il target**.
+              </div>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+
+/* ────────────────────────────────────────────────────────────── */
+/* Statistiche per giorno di inserimento (ultimi 30 giorni)       */
 /* ────────────────────────────────────────────────────────────── */
 function InsertionStatsCard({ rows }) {
   const last30Dates = React.useMemo(() => {
     const set = new Set(
-      rows
+      (rows || [])
         .map((r) => r.dataInserimento)
         .filter((d) => d && /^\d{4}-\d{2}-\d{2}$/.test(d))
         .sort((a, b) => a.localeCompare(b))
@@ -1261,9 +1500,10 @@ function InsertionStatsCard({ rows }) {
     const arr = Array.from(set);
     return arr.slice(-30);
   }, [rows]);
+
   const byDay = React.useMemo(() => {
     const map = new Map();
-    for (const r of rows) {
+    for (const r of rows || []) {
       const d = r.dataInserimento;
       if (!d || !last30Dates.includes(d)) continue;
       map.set(d, (map.get(d) || 0) + 1);
@@ -1276,24 +1516,28 @@ function InsertionStatsCard({ rows }) {
 
   const byOperatore = React.useMemo(() => {
     const map = new Map();
-    for (const r of rows) {
+    for (const r of rows || []) {
       if (!r.dataInserimento || !last30Dates.includes(r.dataInserimento)) continue;
-      map.set((r.operatore || "—").toLowerCase(), (map.get((r.operatore || "—").toLowerCase()) || 0) + 1);
+      const key = (r.operatore || "—").toLowerCase();
+      map.set(key, (map.get(key) || 0) + 1);
     }
     return Array.from(map.entries())
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count);
   }, [rows, last30Dates]);
+
   const byCliente = React.useMemo(() => {
     const map = new Map();
-    for (const r of rows) {
+    for (const r of rows || []) {
       if (!r.dataInserimento || !last30Dates.includes(r.dataInserimento)) continue;
-      map.set(r.cliente || "—", (map.get(r.cliente || "—") || 0) + 1);
+      const key = r.cliente || "—";
+      map.set(key, (map.get(key) || 0) + 1);
     }
     return Array.from(map.entries())
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count);
   }, [rows, last30Dates]);
+
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -1305,25 +1549,31 @@ function InsertionStatsCard({ rows }) {
           <div className="border rounded-xl p-3">
             <div className="text-sm font-medium mb-2">Per operatore</div>
             <div className="space-y-1 max-h-[260px] overflow-auto pr-2">
-              {byOperatore.map((x) => (
-                <div key={x.name} className="flex items-center justify-between text-sm">
-                  <span className="truncate">{x.name}</span>
-                  <span className="font-medium">{x.count}</span>
-                </div>
-              ))}
-              {byOperatore.length === 0 && <div className="text-sm opacity-60">Nessun dato</div>}
+              {byOperatore.length === 0 ? (
+                <div className="text-sm opacity-60">Nessun dato</div>
+              ) : (
+                byOperatore.map((x) => (
+                  <div key={x.name} className="flex items-center justify-between text-sm">
+                    <span className="truncate">{x.name}</span>
+                    <span className="font-medium">{x.count}</span>
+                  </div>
+                ))
+              )}
             </div>
           </div>
           <div className="border rounded-xl p-3">
             <div className="text-sm font-medium mb-2">Per cliente</div>
             <div className="space-y-1 max-h-[260px] overflow-auto pr-2">
-              {byCliente.map((x) => (
-                <div key={x.name} className="flex items-center justify-between text-sm">
-                  <span className="truncate">{x.name}</span>
-                  <span className="font-medium">{x.count}</span>
-                </div>
-              ))}
-              {byCliente.length === 0 && <div className="text-sm opacity-60">Nessun dato</div>}
+              {byCliente.length === 0 ? (
+                <div className="text-sm opacity-60">Nessun dato</div>
+              ) : (
+                byCliente.map((x) => (
+                  <div key={x.name} className="flex items-center justify-between text-sm">
+                    <span className="truncate">{x.name}</span>
+                    <span className="font-medium">{x.count}</span>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>
@@ -1332,6 +1582,10 @@ function InsertionStatsCard({ rows }) {
   );
 }
 
+
+/* ────────────────────────────────────────────────────────────── */
+/* Wrapper a scomparsa riutilizzabile                             */
+/* ────────────────────────────────────────────────────────────── */
 // ⬇️ INCOLLA QUI, poco sopra a: export default function CofaceAppuntamentiDashboard() { ... }
 function Collapsible({ title, storageKey, defaultOpen = false, children }) {
   const [open, setOpen] = React.useState(() => {
@@ -1355,7 +1609,10 @@ function Collapsible({ title, storageKey, defaultOpen = false, children }) {
         className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-gray-50"
       >
         <span className="font-medium">{title}</span>
-        <span className={`transition-transform duration-200 ${open ? "rotate-90" : ""}`} aria-hidden>
+        <span
+          className={`transition-transform duration-200 ${open ? "rotate-90" : ""}`}
+          aria-hidden="true"
+        >
           ▸
         </span>
       </button>
@@ -1368,6 +1625,133 @@ function Collapsible({ title, storageKey, defaultOpen = false, children }) {
     </div>
   );
 }
+
+
+/* ────────────────────────────────────────────────────────────── */
+/* Leaderboard Operatori (mese corrente)                          */
+/* ────────────────────────────────────────────────────────────── */
+function OperatorLeaderboardCard({ rows, target = 15 }) {
+  // helper
+  const monthKey = (d) => d?.slice(0, 7); // "YYYY-MM"
+  const pad = (n) => String(n).padStart(2, "0");
+
+  // mese corrente in locale
+  const now = new Date();
+  const currentYM = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
+
+  // filtra per mese corrente su dataInserimento
+  const rowsThisMonth = React.useMemo(
+    () => rows.filter(r => r.dataInserimento && monthKey(r.dataInserimento) === currentYM),
+    [rows, currentYM]
+  );
+
+  // aggrega per operatore (case-insensitive)
+  const byOp = React.useMemo(() => {
+    const map = new Map();
+    for (const r of rowsThisMonth) {
+      const key = (r.operatore || "—").toLowerCase();
+      map.set(key, (map.get(key) || 0) + 1);
+    }
+    const arr = Array.from(map.entries())
+      .map(([op, count]) => ({ op, count }))
+      .sort((a, b) => b.count - a.count || a.op.localeCompare(b.op));
+    return arr;
+  }, [rowsThisMonth]);
+
+  const leader = byOp[0]?.count || 0;
+  const monthLabel = `${pad(now.getMonth() + 1)}/${String(now.getFullYear()).slice(2)}`;
+
+  // frasette simpatiche
+  const funBadge = (rank, count) => {
+    if (rank === 1 && count >= target) return "🔥 Obiettivo centrato!";
+    if (rank === 1) return "👑 In vetta!";
+    if (count === 0) return "🌱 Si riparte!";
+    if (leader - count <= 2) return "🏃 In rimonta!";
+    return "💪 Avanti così!";
+    };
+
+  // progress %
+  const pct = (num, den) => (den > 0 ? Math.min(100, Math.round((num / den) * 100)) : 0);
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle>🏆 Classifica operatori – {monthLabel}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {byOp.length === 0 ? (
+          <div className="text-sm text-gray-500">Nessun inserimento questo mese.</div>
+        ) : (
+          <div className="space-y-3">
+            {byOp.slice(0, 8).map((row, i) => {
+              const rank = i + 1;
+              const towardsLeader = pct(row.count, Math.max(1, leader));
+              const towardsTarget = pct(row.count, target);
+              const gapLeader = Math.max(0, leader - row.count);
+              const gapTarget = Math.max(0, target - row.count);
+
+              const medal =
+                rank === 1 ? "🥇" :
+                rank === 2 ? "🥈" :
+                rank === 3 ? "🥉" : `${rank}.`;
+
+              // nome “pulito” con prima lettera maiuscola
+              const displayName = row.op
+                .split(" ")
+                .map(s => s ? s[0].toUpperCase() + s.slice(1) : s)
+                .join(" ");
+
+              return (
+                <div key={row.op} className="rounded-xl border p-3 bg-white">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="text-xl w-8 text-center">{medal}</div>
+                      <div>
+                        <div className="font-medium">
+                          {displayName} {rank === 1 && <span className="ml-1">👑</span>}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {funBadge(rank, row.count)}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-lg font-semibold">{row.count}</div>
+                      <div className="text-xs text-gray-500">apppuntamenti</div>
+                    </div>
+                  </div>
+
+                  {/* Progresso verso il primo */}
+                  <div className="mt-3">
+                    <div className="flex justify-between text-[11px] text-gray-500">
+                      <span>Progress vs leader</span>
+                      <span>{towardsLeader}% {gapLeader ? `• manca ${gapLeader}` : "• pari!"}</span>
+                    </div>
+                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                      <div className="h-full bg-gray-800" style={{ width: `${towardsLeader}%` }} />
+                    </div>
+                  </div>
+
+                  {/* Progresso verso obiettivo */}
+                  <div className="mt-2">
+                    <div className="flex justify-between text-[11px] text-gray-500">
+                      <span>Obiettivo mese ({target})</span>
+                      <span>{towardsTarget}% {gapTarget ? `• ${gapTarget} al target` : "• target OK!"}</span>
+                    </div>
+                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                      <div className="h-full bg-green-500" style={{ width: `${towardsTarget}%` }} />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 
 /* ────────────────────────────────────────────────────────────── */
 /* Componente principale                                          */
@@ -1531,6 +1915,12 @@ export default function CofaceAppuntamentiDashboard() {
     });
   }, [rows, agent, creator, client, status, dayAppFrom, dayAppTo, dayInsFrom, dayInsTo, q, sortBy, sortDir]);
 
+  {/* ───────────────── Leaderboard operatori del mese ───────────────── */}
+  <div className="mt-4">
+    <OperatorLeaderboardCard rows={rows} target={15} />
+  </div>
+
+  
   /* paginazione */
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize);
@@ -2045,6 +2435,16 @@ export default function CofaceAppuntamentiDashboard() {
           <KPI />
         </CardContent>
       </Card>
+
+      {/* Leaderboard Operatori – collassabile, Mese/Anno, % annullati */}
+      <Collapsible
+        title="🏆 Classifica Operatori"
+        storageKey="coface:collapse:leaderboard"
+        defaultOpen={true}
+      >
+        <OperatorLeaderboardProCard rows={rows} monthTarget={15} />
+      </Collapsible>
+
 
       {/* ✅ Nuova card: statistiche per giorno di inserimento */}
       <Collapsible
