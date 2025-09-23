@@ -343,6 +343,21 @@ function getAgentEmail(r) {
 }
 
 /* ────────────────────────────────────────────────────────────── */
+/* Email sent flags (persistenza locale via localStorage)         */
+/* ────────────────────────────────────────────────────────────── */
+function emailSentKey(type, id) {
+  return `coface_email_sent:${type}:${id}`;
+}
+function isEmailSent(type, id) {
+  if (!id) return false;
+  try { return localStorage.getItem(emailSentKey(type, id)) === "1"; } catch { return false; }
+}
+function markEmailSent(type, id) {
+  if (!id) return;
+  try { localStorage.setItem(emailSentKey(type, id), "1"); } catch {}
+}
+
+/* ────────────────────────────────────────────────────────────── */
 /* Template email                                                 */
 /* ────────────────────────────────────────────────────────────── */
 function makeEmailAgente(r) {
@@ -367,7 +382,7 @@ function makeEmailAgente(r) {
   ].join("\n");
 
   const to = getAgentEmail(r) || "";
-  const cc = ["arturo.antacido@coface.com"];
+  const cc = ["arturo.antacido@coface.com", "customersuccess.italy@coface.com", "cofaceappuntamenti@apemo.net " ];
   const bcc = ["tlcoface@contaq.it"];
 
   return { to, cc, bcc, subject, body };
@@ -406,8 +421,37 @@ function makeEmailAzienda(r) {
   return { to, cc, bcc, subject, body };
 }
 
+// ✉️ Email ANNULLO (mantieni gg/mm/aaaa) — destinatario: agente; CC/BCC come email agente
+function makeEmailAnnullo(r) {
+  const dataGGMM = fmtDate(r?.data);
+  const subject = `Annullo appuntamento Coface - ${dataGGMM} alle ore ${r?.ora || ""} - ${r?.azienda || ""}`;
+  const body = [
+    `Gentile ${r?.agente || ""},`,
+    ``,
+    `inviamo per notifica l’annullo dell’appuntamento in oggetto precedentemente per il giorno ${dataGGMM} alle ore ${r?.ora || ""}.`,
+    ``,
+    `Azienda: ${r?.azienda || ""}`,
+    `Indirizzo: ${r?.indirizzo || ""} - ${r?.provincia || ""}`,
+    ``,
+    `Referente: ${r?.referente || ""}`,
+    `Telefono: ${r?.telefono || ""}`,
+    `EMAIL: ${r?.email || ""}`,
+    ``,
+    `Sarà nostra cura riprendere in carico l’anagrafica per cercare di fissare un nuovo incontro`,
+    ``,
+    `Buon lavoro`,
+    `${r?.operatore || ""}`,
+  ].join("\n");
+
+  const to  = getAgentEmail(r) || "";
+  const cc  = ["arturo.antacido@coface.com"];
+  const bcc = ["tlcoface@contaq.it"];
+
+  return { to, cc, bcc, subject, body };
+}
+
 /* ─────────────────────────────────────────────────────────── */
-/* Editor (modale)                                             */
+/* Editor (modale) – COMPATTO, SCROLL INTERNO, FOOTER STICKY   */
 /* ─────────────────────────────────────────────────────────── */
 function Editor({
   editing,
@@ -424,6 +468,11 @@ function Editor({
   const r = editing;
   const locked = !!r.fatturato;
 
+  // stato "già inviato" (persistenza locale via localStorage)
+  const sentAzienda = isEmailSent("azienda", r.id);
+  const sentAgente  = isEmailSent("agente",  r.id);
+  const sentAnnullo = isEmailSent("annullo", r.id);
+
   const commonInputProps = (k) => ({
     value: r[k] ?? "",
     onChange: async (e) => {
@@ -434,264 +483,301 @@ function Editor({
     },
     disabled: locked && k !== "note",
   });
+
   return (
     <div
       className="fixed inset-0 bg-black/30 flex items-end md:items-center justify-center p-4 z-50"
       onClick={() => setEditing(null)}
     >
       <div
-        className="bg-white rounded-2xl shadow-xl w-full md:max-w-3xl"
+        className="bg-white rounded-2xl shadow-xl w-full md:max-w-4xl max-h-[90vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between p-4 border-b">
+        {/* HEADER (sticky) */}
+        <div className="flex items-center justify-between p-4 border-b sticky top-0 bg-white z-10">
           <div className="flex items-center gap-2">
             <Calendar className="h-5 w-5" />
             <h3 className="font-semibold">Modifica appuntamento</h3>
           </div>
-        </div>
-
-        <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <Label>Data inserimento</Label>
-            <Input type="date" value={r.dataInserimento || ""} disabled />
-          </div>
-          <div>
-            <Label>Ora inserimento</Label>
-            <Input type="time" value={r.oraInserimento || ""} disabled />
-          </div>
-
-          <div>
-            <Label>Data appuntamento</Label>
-            <Input type="date" {...commonInputProps("data")} />
-          </div>
-          <div>
-            <Label>Ora appuntamento</Label>
-            <Input type="time" {...commonInputProps("ora")} />
-          </div>
-
-          <div className="md:col-span-2">
-            <Label>Azienda</Label>
-            <Input {...commonInputProps("azienda")} />
-          </div>
-
-          <div>
-            <Label>Referente</Label>
-            <Input {...commonInputProps("referente")} />
-          </div>
-          <div>
-            <Label>Telefono</Label>
-            <Input {...commonInputProps("telefono")} />
-          </div>
-          <div>
-            <Label>Email</Label>
-            <Input {...commonInputProps("email")} />
-          </div>
-
-          <div>
-            <Label>Regione</Label>
-            <Input {...commonInputProps("città")} />
-          </div>
-          <div>
-            <Label>Provincia</Label>
-            <Input {...commonInputProps("provincia")} />
-          </div>
-
-          <div>
-            <Label>Agente</Label>
-            <Input {...commonInputProps("agente")} />
-          </div>
-          <div>
-            <Label>Operatore</Label>
-            <Input {...commonInputProps("operatore")} />
-          </div>
-
-          <div>
-            <Label>Cliente</Label>
-            <Select
-              value={r.cliente || ""}
-              onValueChange={(v) => updateRow(r.id, { cliente: v })}
-              disabled={locked}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Seleziona cliente" />
-              </SelectTrigger>
-              <SelectContent>
-                {clientiOpzioni.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {c}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* ✅ Tipo appuntamento con token corretti + setEditing */}
-          <div>
-            <Label>Tipo appuntamento</Label>
-            <Select
-              value={r.tipo_appuntamento || ""}
-              onValueChange={(v) => {
-                setEditing({ ...r, tipo_appuntamento: v });
-                updateRow(r.id, { tipo_appuntamento: v });
-              }}
-              disabled={locked}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Seleziona" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="in_sede">In sede</SelectItem>
-                <SelectItem value="videocall">Videocall</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="md:col-span-2">
-            <Label>ID Contaq (opzionale)</Label>
-            <Input {...commonInputProps("idContaq")} />
-          </div>
-
-          <div>
-            <Label>Stato</Label>
-            <Select
-              value={r.stato}
-              onValueChange={(v) => updateRow(r.id, { stato: v })}
-              disabled={locked}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {STATUSES.map((s) => (
-                  <SelectItem key={s.value} value={s.value}>
-                    {s.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div>
-            <Label>Data annullamento</Label>
-            <Input type="date" {...commonInputProps("dataAnnullamento")} />
-          </div>
-
-          <div>
-            <Label>Data fatturazione</Label>
-            <Input type="date" {...commonInputProps("dataFatturazione")} />
-          </div>
-
-          <div className="md:col-span-2">
-            <Label>Note</Label>
-            <Input {...commonInputProps("note")} />
-          </div>
-          <div className="md:col-span-2">
-            <Label>Indirizzo (solo interno)</Label>
-            <Input {...commonInputProps("indirizzo")} />
+          <div className="text-xs text-gray-500">
+            ID: <span className="font-mono">{r.id}</span>{r.fatturato ? " • FATTURATO" : ""}
           </div>
         </div>
 
-        <div className="p-4 border-t flex flex-wrap items-center justify-between gap-2">
-          <div className="text-sm opacity-70">
-            ID: {r.id} {r.fatturato ? "• FATTURATO" : ""}
+        {/* BODY (scroll) */}
+        <div className="p-4 overflow-y-auto">
+          {/* Gruppo: Metadati inserimento */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+            <div>
+              <Label className="text-xs">Data inserimento</Label>
+              <Input type="date" value={r.dataInserimento || ""} disabled />
+            </div>
+            <div>
+              <Label className="text-xs">Ora inserimento</Label>
+              <Input type="time" value={r.oraInserimento || ""} disabled />
+            </div>
+            <div>
+              <Label className="text-xs">Data appuntamento</Label>
+              <Input type="date" {...commonInputProps("data")} />
+            </div>
+            <div>
+              <Label className="text-xs">Ora appuntamento</Label>
+              <Input type="time" {...commonInputProps("ora")} />
+            </div>
           </div>
 
-          <div className="flex gap-2">
-            <Button
-              variant="secondary"
-              onClick={async () => {
-                await markSvolto(r);
-                setEditing({ ...r, stato: "svolto" });
-              }}
-              className="gap-2"
-              disabled={locked}
-            >
-              <Check className="h-4 w-4" /> Segna svolto
-            </Button>
+          {/* Gruppo: Anagrafica */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+            <div className="md:col-span-2">
+              <Label className="text-xs">Azienda</Label>
+              <Input {...commonInputProps("azienda")} />
+            </div>
 
-            <Button
-              variant="outline"
-              onClick={async () => {
-                await markAnnullato(r);
-                setEditing({
-                  ...r,
-                  stato: "annullato",
-                  dataAnnullamento: todayISO(),
-                });
-              }}
-              className="gap-2"
-              disabled={locked}
-            >
-              <X className="h-4 w-4" /> Annulla
-            </Button>
+            <div>
+              <Label className="text-xs">Referente</Label>
+              <Input {...commonInputProps("referente")} />
+            </div>
+            <div>
+              <Label className="text-xs">Telefono</Label>
+              <Input {...commonInputProps("telefono")} />
+            </div>
+            <div>
+              <Label className="text-xs">Email</Label>
+              <Input {...commonInputProps("email")} />
+            </div>
 
-            <Button
-              variant="outline"
-              onClick={async () => {
-                await markRecupero(r);
-                setEditing({ ...r, stato: "recuperato" });
-              }}
-              className="gap-2"
-              disabled={locked}
-            >
-              <RotateCcw className="h-4 w-4" /> Recuperato
-            </Button>
+            <div>
+              <Label className="text-xs">Regione</Label>
+              <Input {...commonInputProps("città")} />
+            </div>
+            <div>
+              <Label className="text-xs">Provincia</Label>
+              <Input {...commonInputProps("provincia")} />
+            </div>
 
-            {!r.fatturato ? (
-              <Button
-                onClick={async () => {
-                  await markFatturato(r);
-                  setEditing({
-                    ...r,
-                    fatturato: true,
-                    dataFatturazione: todayISO(),
-                  });
-                }}
-                className="gap-2"
+            <div>
+              <Label className="text-xs">Agente</Label>
+              <Input {...commonInputProps("agente")} />
+            </div>
+            <div>
+              <Label className="text-xs">Operatore</Label>
+              <Input {...commonInputProps("operatore")} />
+            </div>
+
+            <div>
+              <Label className="text-xs">Cliente</Label>
+              <Select
+                value={r.cliente || ""}
+                onValueChange={(v) => updateRow(r.id, { cliente: v })}
+                disabled={locked}
               >
-                <DollarSign className="h-4 w-4" /> Segna fatturato
-              </Button>
-            ) : (
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleziona cliente" />
+                </SelectTrigger>
+                <SelectContent>
+                  {clientiOpzioni.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {c}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label className="text-xs">Tipo appuntamento</Label>
+              <Select
+                value={r.tipo_appuntamento || ""}
+                onValueChange={(v) => {
+                  setEditing({ ...r, tipo_appuntamento: v });
+                  updateRow(r.id, { tipo_appuntamento: v });
+                }}
+                disabled={locked}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleziona" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="in_sede">In sede</SelectItem>
+                  <SelectItem value="videocall">Videocall</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="md:col-span-2">
+              <Label className="text-xs">ID Contaq (opzionale)</Label>
+              <Input {...commonInputProps("idContaq")} />
+            </div>
+          </div>
+
+          {/* Gruppo: Stato e fatturazione */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+            <div>
+              <Label className="text-xs">Stato</Label>
+              <Select
+                value={r.stato}
+                onValueChange={(v) => updateRow(r.id, { stato: v })}
+                disabled={locked}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {STATUSES.map((s) => (
+                    <SelectItem key={s.value} value={s.value}>
+                      {s.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs">Data annullamento</Label>
+              <Input type="date" {...commonInputProps("dataAnnullamento")} />
+            </div>
+            <div>
+              <Label className="text-xs">Data fatturazione</Label>
+              <Input type="date" {...commonInputProps("dataFatturazione")} />
+            </div>
+          </div>
+
+          {/* Gruppo: Note e indirizzo */}
+          <div className="grid grid-cols-1 gap-3">
+            <div>
+              <Label className="text-xs">Note</Label>
+              <Input {...commonInputProps("note")} />
+            </div>
+            <div>
+              <Label className="text-xs">Indirizzo (solo interno)</Label>
+              <Input {...commonInputProps("indirizzo")} />
+            </div>
+          </div>
+        </div>
+
+        {/* FOOTER (sticky) */}
+        <div className="p-3 border-t bg-white sticky bottom-0 z-10">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+            {/* Azioni stato */}
+            <div className="flex flex-wrap gap-2">
               <Button
                 variant="secondary"
                 onClick={async () => {
-                  await unmarkFatturato(r);
+                  await markSvolto(r);
+                  setEditing({ ...r, stato: "svolto" });
+                }}
+                className="gap-2"
+                disabled={locked}
+              >
+                <Check className="h-4 w-4" /> Segna svolto
+              </Button>
+
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  await markAnnullato(r);
                   setEditing({
                     ...r,
-                    fatturato: false,
-                    dataFatturazione: "",
+                    stato: "annullato",
+                    dataAnnullamento: todayISO(),
                   });
                 }}
                 className="gap-2"
+                disabled={locked}
               >
-                <DollarSign className="h-4 w-4" /> Togli fatturato
+                <X className="h-4 w-4" /> Annulla
               </Button>
-            )}
 
-            <Button
-              variant="outline"
-              onClick={() => {
-                const { to, cc, bcc, subject, body } = makeEmailAzienda(r);
-                openEmail({ to, cc, bcc, subject, body });
-              }}
-              className="gap-2"
-              title="Email conferma a azienda"
-            >
-              <Mail className="h-4 w-4" />
-              Email azienda
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => {
-                const { to, cc, bcc, subject, body } = makeEmailAgente(r);
-                openEmail({ to, cc, bcc, subject, body });
-              }}
-              className="gap-2"
-              title="Email notifica a agente"
-            >
-              <Mail className="h-4 w-4" />
-              Email agente
-            </Button>
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  await markRecupero(r);
+                  setEditing({ ...r, stato: "recuperato" });
+                }}
+                className="gap-2"
+                disabled={locked}
+              >
+                <RotateCcw className="h-4 w-4" /> Recuperato
+              </Button>
+
+              {!r.fatturato ? (
+                <Button
+                  onClick={async () => {
+                    await markFatturato(r);
+                    setEditing({
+                      ...r,
+                      fatturato: true,
+                      dataFatturazione: todayISO(),
+                    });
+                  }}
+                  className="gap-2"
+                >
+                  <DollarSign className="h-4 w-4" /> Segna fatturato
+                </Button>
+              ) : (
+                <Button
+                  variant="secondary"
+                  onClick={async () => {
+                    await unmarkFatturato(r);
+                    setEditing({
+                      ...r,
+                      fatturato: false,
+                      dataFatturazione: "",
+                    });
+                  }}
+                  className="gap-2"
+                >
+                  <DollarSign className="h-4 w-4" /> Togli fatturato
+                </Button>
+              )}
+            </div>
+
+            {/* Bottoni email (wrappano su 2 righe se serve) */}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const { to, cc, bcc, subject, body } = makeEmailAzienda(r);
+                  openEmail({ to, cc, bcc, subject, body });
+                  markEmailSent("azienda", r.id);
+                  setEditing({ ...r });
+                }}
+                className={`gap-2 ${sentAzienda ? "text-green-600 font-medium" : ""}`}
+                title="Email conferma a azienda"
+              >
+                <Mail className="h-4 w-4" />
+                Email azienda
+              </Button>
+
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const { to, cc, bcc, subject, body } = makeEmailAgente(r);
+                  openEmail({ to, cc, bcc, subject, body });
+                  markEmailSent("agente", r.id);
+                  setEditing({ ...r });
+                }}
+                className={`gap-2 ${sentAgente ? "text-green-600 font-medium" : ""}`}
+                title="Email notifica a agente"
+              >
+                <Mail className="h-4 w-4" />
+                Email agente
+              </Button>
+
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const { to, cc, bcc, subject, body } = makeEmailAnnullo(r);
+                  openEmail({ to, cc, bcc, subject, body });
+                  markEmailSent("annullo", r.id);
+                  setEditing({ ...r });
+                }}
+                className={`gap-2 ${sentAnnullo ? "text-green-600 font-medium" : ""}`}
+                title="Email annullo appuntamento"
+              >
+                <Mail className="h-4 w-4" />
+                Email annullo
+              </Button>
+            </div>
           </div>
         </div>
       </div>
@@ -1229,6 +1315,43 @@ function InsertionStatsCard({ rows }) {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+// ⬇️ INCOLLA QUI, poco sopra a: export default function CofaceAppuntamentiDashboard() { ... }
+function Collapsible({ title, storageKey, defaultOpen = false, children }) {
+  const [open, setOpen] = React.useState(() => {
+    try {
+      const saved = storageKey ? localStorage.getItem(storageKey) : null;
+      return saved != null ? saved === "1" : defaultOpen;
+    } catch {
+      return defaultOpen;
+    }
+  });
+
+  React.useEffect(() => {
+    try { if (storageKey) localStorage.setItem(storageKey, open ? "1" : "0"); } catch {}
+  }, [open, storageKey]);
+
+  return (
+    <div className="border rounded-xl overflow-hidden bg-white">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-gray-50"
+      >
+        <span className="font-medium">{title}</span>
+        <span className={`transition-transform duration-200 ${open ? "rotate-90" : ""}`} aria-hidden>
+          ▸
+        </span>
+      </button>
+
+      <div className={`transition-[grid-template-rows] duration-200 grid ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+        <div className="overflow-hidden">
+          <div className="p-4">{children}</div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1910,10 +2033,29 @@ export default function CofaceAppuntamentiDashboard() {
       </Card>
 
       {/* ✅ Nuova card: statistiche per giorno di inserimento */}
-      <InsertionStatsCard rows={rows} />
+      <Collapsible
+        title="Statistiche per giorno di inserimento (ultimi 30 giorni presenti)"
+        storageKey="coface:collapse:ins-stats"
+        defaultOpen={false}
+      >
+        <InsertionStatsCard rows={rows} />
+      </Collapsible>
+
+
 
       {/* STATISTICHE PER OPERATORE */}
-      <OperatorStatsCard rowsAll={rows} rowsFiltered={filtered} creators={creators} />
+      <Collapsible
+        title="Statistiche per Operatore"
+        storageKey="coface:collapse:op-stats"
+        defaultOpen={false}
+      >
+        <OperatorStatsCard
+          rowsAll={rows}
+          rowsFiltered={filtered}
+          creators={creators}
+        />
+      </Collapsible>
+
 
       {/* TABELLA */}
       <Card>
