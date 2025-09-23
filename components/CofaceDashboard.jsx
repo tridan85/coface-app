@@ -254,31 +254,45 @@ function mailtoUrl({ to, cc, bcc, subject, body }) {
   return `mailto:${toStr}${parts.length ? "?" + parts.join("&") : ""}`;
 }
 
+/* ───────────────── EMAIL UTILS — open in NEW TAB only ───────────────── */
+
+function _joinEmails(v) {
+  return Array.isArray(v) ? v.filter(Boolean).join(",") : (v || "");
+}
+
+/** Builder: usa il converter Gmail (mantiene CC/BCC) */
+function _gmailConverterUrl({ to, cc, bcc, subject, body }) {
+  const enc   = encodeURIComponent;
+  const toStr = _joinEmails(to);
+  const ccStr = _joinEmails(cc);
+  const bccStr = _joinEmails(bcc);
+
+  const q = [];
+  if (subject) q.push(`subject=${enc(subject)}`);
+  if (body)    q.push(`body=${enc(body)}`);
+  if (ccStr)   q.push(`cc=${enc(ccStr)}`);
+  if (bccStr)  q.push(`bcc=${enc(bccStr)}`);
+
+  const mailto = `mailto:${toStr}${q.length ? "?" + q.join("&") : ""}`;
+  return `https://mail.google.com/mail/u/0/?extsrc=mailto&url=${enc(mailto)}`;
+}
+
 /**
- * Apre SEMPRE Gmail Web nella stessa tab con To/CC/BCC/Subject/Body.
- * Se il primo compose ignora CC/BCC (alcuni tenant/policy), dopo 250ms
- * forza il percorso ufficiale Gmail che converte un mailto in compose
- * preservando i campi.
+ * Apre SEMPRE in una nuova scheda, senza toccare quella corrente.
+ * Usa un <a target="_blank"> sintetico per evitare comportamenti strani.
  */
 function openEmail({ to, cc, bcc, subject, body }) {
-  try {
-    const urlG = gmailComposeUrl({ to, cc, bcc, subject, body });
-    window.location.assign(urlG);
+  const url = _gmailConverterUrl({ to, cc, bcc, subject, body });
 
-    // Fallback “ufficiale” Gmail (conversione mailto→compose)
-    setTimeout(() => {
-      const mailto = mailtoUrl({ to, cc, bcc, subject, body });
-      const enc = encodeURIComponent;
-      const gmailConvert = `https://mail.google.com/mail/u/0/?extsrc=mailto&url=${enc(mailto)}`;
-      window.location.assign(gmailConvert);
-    }, 250);
-  } catch {
-    // Estremo: prova direttamente la conversione mailto→compose
-    const mailto = mailtoUrl({ to, cc, bcc, subject, body });
-    const enc = encodeURIComponent;
-    window.location.assign(`https://mail.google.com/mail/u/0/?extsrc=mailto&url=${enc(mailto)}`);
-  }
+  const a = document.createElement("a");
+  a.href = url;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
+
 
 /* ────────────────────────────────────────────────────────────── */
 /* Helper tipo appuntamento + lookup email agente                 */
