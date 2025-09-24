@@ -1586,26 +1586,38 @@ function InsertionStatsCard({ rows }) {
 /* ────────────────────────────────────────────────────────────── */
 /* Wrapper a scomparsa riutilizzabile                             */
 /* ────────────────────────────────────────────────────────────── */
-// ⬇️ INCOLLA QUI, poco sopra a: export default function CofaceAppuntamentiDashboard() { ... }
+// ──────────────────────────────────────────────────────────────
 function Collapsible({ title, storageKey, defaultOpen = false, children }) {
-  const [open, setOpen] = React.useState(() => {
-    try {
-      const saved = storageKey ? localStorage.getItem(storageKey) : null;
-      return saved != null ? saved === "1" : defaultOpen;
-    } catch {
-      return defaultOpen;
-    }
-  });
+  // 1️⃣ parte sempre chiuso sul server/first paint per evitare hydration mismatch
+  const [open, setOpen] = React.useState(false);
+  const mountedRef = React.useRef(false);
 
+  // 2️⃣ al mount, carico eventuale valore salvato o fallback a defaultOpen
   React.useEffect(() => {
-    try { if (storageKey) localStorage.setItem(storageKey, open ? "1" : "0"); } catch {}
+    let initial = defaultOpen;
+    try {
+      if (storageKey) {
+        const saved = localStorage.getItem(storageKey);
+        if (saved !== null) initial = saved === "1";
+      }
+    } catch {}
+    setOpen(initial);
+    mountedRef.current = true;
+  }, [storageKey, defaultOpen]);
+
+  // 3️⃣ salva lo stato solo dopo il mount
+  React.useEffect(() => {
+    if (!mountedRef.current) return;
+    try {
+      if (storageKey) localStorage.setItem(storageKey, open ? "1" : "0");
+    } catch {}
   }, [open, storageKey]);
 
   return (
     <div className="border rounded-xl overflow-hidden bg-white">
       <button
         type="button"
-        onClick={() => setOpen(!open)}
+        onClick={() => setOpen(o => !o)}
         className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-gray-50"
       >
         <span className="font-medium">{title}</span>
@@ -1617,7 +1629,11 @@ function Collapsible({ title, storageKey, defaultOpen = false, children }) {
         </span>
       </button>
 
-      <div className={`transition-[grid-template-rows] duration-200 grid ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+      <div
+        className={`transition-[grid-template-rows] duration-200 grid ${
+          open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+        }`}
+      >
         <div className="overflow-hidden">
           <div className="p-4">{children}</div>
         </div>
@@ -1625,6 +1641,7 @@ function Collapsible({ title, storageKey, defaultOpen = false, children }) {
     </div>
   );
 }
+
 
 
 /* ────────────────────────────────────────────────────────────── */
@@ -2439,8 +2456,8 @@ export default function CofaceAppuntamentiDashboard() {
       {/* Leaderboard Operatori – collassabile, Mese/Anno, % annullati */}
       <Collapsible
         title="🏆 Classifica Operatori"
-        storageKey="coface:collapse:leaderboard"
-        defaultOpen={true}
+        storageKey="coface:collapse:leaderboard-v3"  // nuovo nome
+        defaultOpen={false}                          // chiusa di default
       >
         <OperatorLeaderboardProCard rows={rows} monthTarget={15} />
       </Collapsible>
