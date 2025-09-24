@@ -1769,6 +1769,175 @@ function OperatorLeaderboardCard({ rows, target = 15 }) {
   );
 }
 
+function CancellationStatsCard({ stats, annMonth, setAnnMonth, annYear, setAnnYear, detailRows }) {
+  const months = [
+    { v:1,  l:"Gen" }, { v:2,  l:"Feb" }, { v:3,  l:"Mar" }, { v:4,  l:"Apr" },
+    { v:5,  l:"Mag" }, { v:6,  l:"Giu" }, { v:7,  l:"Lug" }, { v:8,  l:"Ago" },
+    { v:9,  l:"Set" }, { v:10, l:"Ott" }, { v:11, l:"Nov" }, { v:12, l:"Dic" },
+  ];
+  const years = (() => {
+    const y0 = new Date().getFullYear() - 3;
+    return Array.from({ length: 7 }, (_, i) => y0 + i);
+  })();
+
+  function fmtDate(d) {
+    if (!d) return "";
+    const dd = d instanceof Date ? d : new Date(d);
+    if (Number.isNaN(dd.getTime())) return "";
+    const y = dd.getFullYear();
+    const m = String(dd.getMonth() + 1).padStart(2, "0");
+    const day = String(dd.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+
+  function exportExcel() {
+    // Foglio 1: RIEPILOGO
+    const summaryAOA = [
+      ["Operatore","Inseriti mese","Annullati mese","% annulli mese"]
+    ];
+    for (const r of stats) {
+      summaryAOA.push([
+        r.operatore,
+        r.inseritiMese,
+        r.annullatiMese,
+        r.percAnnulli == null ? "" : (r.percAnnulli * 100).toFixed(1) + "%"
+      ]);
+    }
+    const wb = XLSX.utils.book_new();
+    const ws1 = XLSX.utils.aoa_to_sheet(summaryAOA);
+    XLSX.utils.book_append_sheet(wb, ws1, "Riepilogo Annulli");
+
+    // Foglio 2: DETTAGLIO, raggruppato per Operatore (righe vuote come separatori)
+    const header = [
+      "ID","Operatore","Data Inserimento","Data Appuntamento",
+      "Azienda","Luogo","Cliente","Agente","Tipo","Stato",
+      "Data Annullamento","Referente","Email","Telefono","Indirizzo","Provincia","ID Contaq","Note"
+    ];
+    const detailAOA = [header];
+
+    // Raggruppo per operatore
+    const byOp = new Map();
+    for (const r of detailRows) {
+      const op = r.operatore || "—";
+      if (!byOp.has(op)) byOp.set(op, []);
+      byOp.get(op).push(r);
+    }
+
+    const ops = Array.from(byOp.keys()).sort((a,b) => a.localeCompare(b, "it", { sensitivity: "base" }));
+    ops.forEach((op, idx) => {
+      if (idx > 0) detailAOA.push([]);            // riga vuota separatore
+      detailAOA.push([`Operatore: ${op}`]);       // intestazione gruppo
+
+      for (const r of byOp.get(op)) {
+        detailAOA.push([
+          r.id ?? "",
+          r.operatore ?? "",
+          fmtDate(r.dataInserimento),
+          fmtDate(r.dataAppuntamento),
+          r.azienda ?? "",
+          r.città || r.luogo || "",               // adattati ai tuoi naming
+          r.cliente ?? "",
+          r.agente ?? "",
+          r.tipo ?? "",
+          r.stato ?? "",
+          fmtDate(r.dataAnnullamento),
+          r.referente ?? "",
+          r.email ?? "",
+          r.telefono ?? "",
+          r.indirizzo ?? "",
+          r.provincia ?? "",
+          r.idContaq ?? "",
+          r.note ?? ""
+        ]);
+      }
+    });
+
+    const ws2 = XLSX.utils.aoa_to_sheet(detailAOA);
+    XLSX.utils.book_append_sheet(wb, ws2, "Dettaglio Appuntamenti");
+
+    const fname = `annulli_${annYear}-${String(annMonth).padStart(2,"0")}.xlsx`;
+    XLSX.writeFile(wb, fname);
+  }
+
+  return (
+    <Card>
+      <div className="flex items-center gap-2">
+        <Select value={String(annMonth)} onValueChange={(v)=>setAnnMonth(Number(v))}>
+          <SelectTrigger className="w-[110px]">
+            <SelectValue placeholder="Mese" />
+          </SelectTrigger>
+          <SelectContent>
+            {months.map(m => (
+              <SelectItem key={m.v} value={String(m.v)}>
+                {m.l}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={String(annYear)} onValueChange={(v)=>setAnnYear(Number(v))}>
+          <SelectTrigger className="w-[110px]">
+            <SelectValue placeholder="Anno" />
+          </SelectTrigger>
+          <SelectContent>
+            {years.map(y => (
+              <SelectItem key={y} value={String(y)}>
+                {y}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Button variant="outline" onClick={exportExcel}>
+          Export Excel (2 fogli)
+        </Button>
+      </div>
+
+
+      <div className="px-4 pb-4">
+        <div className="overflow-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="text-left border-b">
+                <th className="py-2 pr-3">Operatore</th>
+                <th className="py-2 pr-3">Inseriti mese</th>
+                <th className="py-2 pr-3">Annullati mese</th>
+                <th className="py-2 pr-3">% annulli mese</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stats.map((r) => {
+                const pct = r.percAnnulli == null ? "—" : (r.percAnnulli * 100).toFixed(1) + "%";
+                const warn = r.percAnnulli != null && r.percAnnulli > 1;
+                return (
+                  <tr key={r.operatore} className="border-b last:border-0">
+                    <td className="py-2 pr-3">{r.operatore}</td>
+                    <td className="py-2 pr-3">{r.inseritiMese}</td>
+                    <td className="py-2 pr-3">{r.annullatiMese}</td>
+                    <td className={`py-2 pr-3 ${warn ? "text-red-600 font-medium" : ""}`}>{pct}</td>
+                  </tr>
+                );
+              })}
+              {stats.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="py-4 text-center text-muted-foreground">
+                    Nessun dato per il mese selezionato
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <p className="text-xs text-muted-foreground mt-2">
+          La metrica è: annullati con <em>data annullamento</em> nel mese / inseriti con <em>data inserimento</em> nel mese.
+          Il dettaglio include tutti gli appuntamenti inseriti-nel-mese o annullati-nel-mese, raggruppati per operatore.
+        </p>
+      </div>
+    </Card>
+  );
+}
+
+
 
 /* ────────────────────────────────────────────────────────────── */
 /* Componente principale                                          */
@@ -1811,6 +1980,9 @@ export default function CofaceAppuntamentiDashboard() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [createOpen, setCreateOpen] = useState(false);
+  const now = new Date();
+  const [annMonth, setAnnMonth] = useState(now.getMonth() + 1); // 1..12
+  const [annYear,  setAnnYear]  = useState(now.getFullYear());
 
   // Primo fetch (pubblico) + realtime
   useEffect(() => {
@@ -1936,6 +2108,112 @@ export default function CofaceAppuntamentiDashboard() {
   <div className="mt-4">
     <OperatorLeaderboardCard rows={rows} target={15} />
   </div>
+  
+const cancellationStats = useMemo(() => {
+  // Helper: anno-mese di una data (supporta Date o stringa ISO)
+  function ymOf(d) {
+    if (!d) return null;
+    const dt = d instanceof Date ? d : new Date(d);
+    if (Number.isNaN(dt.getTime())) return null;
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`;
+  }
+
+  const ym = `${annYear}-${String(annMonth).padStart(2, "0")}`;
+
+  // Base coerente con i filtri di contesto (agente/operatore/cliente + ricerca libera)
+  let base = rows;
+  if (agent !== "tutti")   base = base.filter(r => r.agente === agent);
+  if (creator !== "tutti") base = base.filter(r => (r.operatore || "").toLowerCase() === creator);
+  if (client !== "tutti")  base = base.filter(r => r.cliente === client);
+  if (q?.trim()) {
+    const n = q.trim().toLowerCase();
+    base = base.filter((r) =>
+      [
+        r.azienda, r.referente, r.email, r.telefono, r.città, r.indirizzo,
+        r.provincia, r.agente, r.operatore, r.cliente, r.idContaq, r.note,
+      ]
+      .filter(Boolean)
+      .some((v) => String(v).toLowerCase().includes(n))
+    );
+  }
+
+  const insMap = new Map(); // inseriti nel mese (denominatore)
+  const annMap = new Map(); // annullati "arrivati" nel mese (numeratore)
+
+  for (const r of base) {
+    const op = (r.operatore || "—").toLowerCase();
+
+    // Denominatore: data inserimento nel mese
+    if (ymOf(r.dataInserimento) === ym) {
+      insMap.set(op, (insMap.get(op) || 0) + 1);
+    }
+
+    // Numeratore: stato annullato con data annullamento nel mese
+    if ((r.stato || "").toLowerCase() === "annullato" && ymOf(r.dataAnnullamento) === ym) {
+      annMap.set(op, (annMap.get(op) || 0) + 1);
+    }
+  }
+
+  const ops = new Set([...insMap.keys(), ...annMap.keys()]);
+  const out = [];
+  for (const op of ops) {
+    const inseritiMese  = insMap.get(op) || 0;
+    const annullatiMese = annMap.get(op) || 0;
+    const percAnnulli   = inseritiMese > 0 ? (annullatiMese / inseritiMese) : null; // null = N/D
+    out.push({ operatore: op, inseritiMese, annullatiMese, percAnnulli });
+  }
+
+  out.sort((a, b) => (b.percAnnulli ?? -1) - (a.percAnnulli ?? -1));
+  return out;
+}, [rows, agent, creator, client, q, annMonth, annYear]);
+
+const cancellationDetailRows = useMemo(() => {
+  function ymOf(d) {
+    if (!d) return null;
+    const dt = d instanceof Date ? d : new Date(d);
+    if (Number.isNaN(dt.getTime())) return null;
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`;
+  }
+  const ym = `${annYear}-${String(annMonth).padStart(2, "0")}`;
+
+  // Base coerente con i filtri di contesto (agente/operatore/cliente + ricerca libera),
+  // ignorando volutamente filtri di stato/data: l'intervallo è il mese selezionato.
+  let base = rows;
+  if (agent !== "tutti")   base = base.filter(r => r.agente === agent);
+  if (creator !== "tutti") base = base.filter(r => (r.operatore || "").toLowerCase() === creator);
+  if (client !== "tutti")  base = base.filter(r => r.cliente === client);
+  if (q?.trim()) {
+    const n = q.trim().toLowerCase();
+    base = base.filter((r) =>
+      [
+        r.azienda, r.referente, r.email, r.telefono, r.città, r.indirizzo,
+        r.provincia, r.agente, r.operatore, r.cliente, r.idContaq, r.note,
+      ]
+      .filter(Boolean)
+      .some((v) => String(v).toLowerCase().includes(n))
+    );
+  }
+
+  // Dettaglio del MESE: prendiamo tutti gli app.
+  // (1) inseriti nel mese  OR  (2) annullati nel mese
+  const detail = base.filter(r => {
+    const inseritoYM = ymOf(r.dataInserimento) === ym;
+    const annYM = (r.stato || "").toLowerCase() === "annullato" && ymOf(r.dataAnnullamento) === ym;
+    return inseritoYM || annYM;
+  });
+
+  // Ordine: Operatore asc, poi Data Inserimento asc, poi ID
+  detail.sort((a, b) => {
+    const oa = (a.operatore || "—").localeCompare(b.operatore || "—", "it", { sensitivity: "base" });
+    if (oa !== 0) return oa;
+    const da = new Date(a.dataInserimento || 0).getTime();
+    const db = new Date(b.dataInserimento || 0).getTime();
+    if (da !== db) return da - db;
+    return String(a.id || "").localeCompare(String(b.id || ""));
+  });
+
+  return detail;
+}, [rows, agent, creator, client, q, annMonth, annYear]);
 
   
   /* paginazione */
@@ -2055,9 +2333,15 @@ export default function CofaceAppuntamentiDashboard() {
     return true;
   }
 
-  function markSvolto(r) { return updateRowSecure(r.id, { stato: "svolto" }); }
-  function markAnnullato(r) { return updateRowSecure(r.id, { stato: "annullato", dataAnnullamento: todayISO() }); }
-  function markRecupero(r) { return updateRowSecure(r.id, { stato: "recuperato" }); }
+  function markSvolto(r) { 
+  return updateRowSecure(r.id, { stato: "svolto", dataAnnullamento: null }); 
+}
+function markAnnullato(r) { 
+  return updateRowSecure(r.id, { stato: "annullato", dataAnnullamento: todayISO() }); 
+}
+function markRecupero(r) { 
+  return updateRowSecure(r.id, { stato: "recuperato", dataAnnullamento: null }); 
+}
   function markFatturato(r) { return updateRowSecure(r.id, { fatturato: true, dataFatturazione: todayISO() }); }
   function unmarkFatturato(r) { return updateRowSecure(r.id, { fatturato: false, dataFatturazione: "" }); }
 
@@ -2460,6 +2744,21 @@ export default function CofaceAppuntamentiDashboard() {
         defaultOpen={false}                          // chiusa di default
       >
         <OperatorLeaderboardProCard rows={rows} monthTarget={15} />
+      </Collapsible>
+
+      <Collapsible
+        title="📉 Annulli (mese vs inseriti)"
+        storageKey="coface:collapse:ann-stats"
+        defaultOpen={false}
+      >
+        <CancellationStatsCard
+          stats={cancellationStats}
+          annMonth={annMonth}
+          setAnnMonth={setAnnMonth}
+          annYear={annYear}
+          setAnnYear={setAnnYear}
+          detailRows={cancellationDetailRows}
+        />
       </Collapsible>
 
 
