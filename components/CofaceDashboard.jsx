@@ -173,6 +173,7 @@ function generateId() {
 function rowFromDb(db) {
   return {
     ...db,
+    piva: db.piva ?? "",
     // UI: "città" (accentata) ←→ DB: citta
     città: db.citta ?? "",
     // UI espone direttamente la chiave DB corretta (niente camel)
@@ -198,6 +199,7 @@ const DEFAULT_HEADERS = [
   "Data Appuntamento",
   "Ora Appuntamento",
   "Azienda",
+  "P.iva",
   "Referente",
   "Telefono",
   "Email",
@@ -383,6 +385,7 @@ function makeEmailAgente(r) {
     `abbiamo fissato un appuntamento ${tipoLabel(r)} per il giorno ${dataGGMM} alle ore ${r?.ora || ""}.`,
     ``,
     `Azienda: ${r?.azienda || ""}`,
+    `P.IVA: ${r?.piva || ""}`,
     `Indirizzo: ${r?.indirizzo || ""} - ${r?.provincia || ""}`,
     ``,
     `Referente: ${r?.referente || ""}`,
@@ -445,6 +448,7 @@ function makeEmailAnnullo(r) {
     `inviamo per notifica l’annullo dell’appuntamento in oggetto precedentemente per il giorno ${dataGGMM} alle ore ${r?.ora || ""}.`,
     ``,
     `Azienda: ${r?.azienda || ""}`,
+    `P.IVA: ${r?.piva || ""}`,
     `Indirizzo: ${r?.indirizzo || ""} - ${r?.provincia || ""}`,
     ``,
     `Referente: ${r?.referente || ""}`,
@@ -559,7 +563,10 @@ function Editor({
               <Label className="text-xs">Email</Label>
               <Input {...commonInputProps("email")} />
             </div>
-
+            <div>
+              <Label className="text-xs">P.iva</Label>
+              <Input {...commonInputProps("piva")} />
+            </div>  
             <div>
               <Label className="text-xs">Regione</Label>
               <Input {...commonInputProps("città")} />
@@ -1937,6 +1944,71 @@ function CancellationStatsCard({ stats, annMonth, setAnnMonth, annYear, setAnnYe
   );
 }
 
+function TodayByClientCard({ data }) {
+  const { rows, totals } = data;
+
+  return (
+    <Card>
+      <div className="p-4 flex items-center justify-between">
+        <div className="font-semibold text-lg">Oggi per cliente</div>
+        <div className="text-sm text-muted-foreground">
+          Totale oggi: <span className="font-medium">{totals.totale}</span>
+        </div>
+      </div>
+
+      <div className="px-4 pb-4">
+        <div className="overflow-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="text-left border-b">
+                <th className="py-2 pr-3">Cliente</th>
+                <th className="py-2 pr-3">Programm.</th>
+                <th className="py-2 pr-3">Svolti</th>
+                <th className="py-2 pr-3">Annullati</th>
+                <th className="py-2 pr-3">Recuperati</th>
+                <th className="py-2 pr-3">Totale</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={r.cliente} className="border-b last:border-0">
+                  <td className="py-2 pr-3">{r.cliente}</td>
+                  <td className="py-2 pr-3">{r.programmati}</td>
+                  <td className="py-2 pr-3">{r.svolti}</td>
+                  <td className="py-2 pr-3">{r.annullati}</td>
+                  <td className="py-2 pr-3">{r.recuperati}</td>
+                  <td className="py-2 pr-3 font-medium">{r.totale}</td>
+                </tr>
+              ))}
+              {rows.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="py-4 text-center text-muted-foreground">
+                    Nessun appuntamento per oggi
+                  </td>
+                </tr>
+              )}
+            </tbody>
+            {rows.length > 0 && (
+              <tfoot>
+                <tr className="border-t">
+                  <td className="py-2 pr-3 font-medium">Totale</td>
+                  <td className="py-2 pr-3">{totals.programmati}</td>
+                  <td className="py-2 pr-3">{totals.svolti}</td>
+                  <td className="py-2 pr-3">{totals.annullati}</td>
+                  <td className="py-2 pr-3">{totals.recuperati}</td>
+                  <td className="py-2 pr-3 font-semibold">{totals.totale}</td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+        <p className="text-xs text-muted-foreground mt-2">
+          Suddivisione per <em>cliente</em> degli appuntamenti con <em>data appuntamento</em> uguale ad oggi, rispettando i filtri di contesto.
+        </p>
+      </div>
+    </Card>
+  );
+}
 
 
 /* ────────────────────────────────────────────────────────────── */
@@ -2086,7 +2158,7 @@ export default function CofaceAppuntamentiDashboard() {
       const n = q.trim().toLowerCase();
       out = out.filter((r) =>
         [
-          r.azienda, r.referente, r.email, r.telefono, r.città, r.indirizzo,
+          r.azienda, r.referente, r.email, r.telefono, r.piva, r.città, r.indirizzo,
           r.provincia, r.agente, r.operatore, r.cliente, r.idContaq, r.note,
         ]
           .filter(Boolean)
@@ -2129,7 +2201,7 @@ const cancellationStats = useMemo(() => {
     const n = q.trim().toLowerCase();
     base = base.filter((r) =>
       [
-        r.azienda, r.referente, r.email, r.telefono, r.città, r.indirizzo,
+        r.azienda, r.referente, r.email, r.telefono, r.piva, r.città, r.indirizzo,
         r.provincia, r.agente, r.operatore, r.cliente, r.idContaq, r.note,
       ]
       .filter(Boolean)
@@ -2186,7 +2258,7 @@ const cancellationDetailRows = useMemo(() => {
     const n = q.trim().toLowerCase();
     base = base.filter((r) =>
       [
-        r.azienda, r.referente, r.email, r.telefono, r.città, r.indirizzo,
+        r.azienda, r.referente, r.email, r.telefono, r.piva, r.città, r.indirizzo,
         r.provincia, r.agente, r.operatore, r.cliente, r.idContaq, r.note,
       ]
       .filter(Boolean)
@@ -2215,6 +2287,73 @@ const cancellationDetailRows = useMemo(() => {
   return detail;
 }, [rows, agent, creator, client, q, annMonth, annYear]);
 
+const todayByClient = useMemo(() => {
+  // oggi (in locale) — confrontiamo solo Y-M-D
+  const today = new Date();
+  const y = today.getFullYear();
+  const m = today.getMonth();
+  const d = today.getDate();
+
+  function isToday(dateLike) {
+    if (!dateLike) return false;
+    const dt = dateLike instanceof Date ? dateLike : new Date(dateLike);
+    return (
+      dt.getFullYear() === y &&
+      dt.getMonth() === m &&
+      dt.getDate() === d
+    );
+  }
+
+  // Base coerente con i filtri di contesto
+  let base = rows;
+  if (agent !== "tutti")   base = base.filter(r => r.agente === agent);
+  if (creator !== "tutti") base = base.filter(r => (r.operatore || "").toLowerCase() === creator);
+  if (client !== "tutti")  base = base.filter(r => r.cliente === client);
+  if (q?.trim()) {
+    const n = q.trim().toLowerCase();
+    base = base.filter((r) =>
+      [
+        r.azienda, r.referente, r.email, r.telefono, r.piva, r.città, r.indirizzo,
+        r.provincia, r.agente, r.operatore, r.cliente, r.idContaq, r.note,
+      ]
+      .filter(Boolean)
+      .some((v) => String(v).toLowerCase().includes(n))
+    );
+  }
+
+  // 🔴 QUI il cambio: consideriamo SOLO gli appuntamenti INSERITI OGGI
+  const todayRows = base.filter(r => isToday(r.dataInserimento));
+
+  // Raggruppo per cliente e conteggi stato
+  const map = new Map();
+  for (const r of todayRows) {
+    const cli = r.cliente || "—";
+    if (!map.has(cli)) map.set(cli, { cliente: cli, programmati: 0, svolti: 0, annullati: 0, recuperati: 0, totale: 0 });
+    const g = map.get(cli);
+    const stato = (r.stato || "").toLowerCase();
+    if (stato === "svolto") g.svolti += 1;
+    else if (stato === "annullato") g.annullati += 1;
+    else if (stato === "recuperato") g.recuperati += 1;
+    else g.programmati += 1;
+    g.totale += 1;
+  }
+
+  const out = Array.from(map.values());
+  out.sort((a, b) => b.totale - a.totale || a.cliente.localeCompare(b.cliente, "it", { sensitivity: "base" }));
+
+  const totals = out.reduce((acc, r) => {
+    acc.programmati += r.programmati;
+    acc.svolti += r.svolti;
+    acc.annullati += r.annullati;
+    acc.recuperati += r.recuperati;
+    acc.totale += r.totale;
+    return acc;
+  }, { programmati: 0, svolti: 0, annullati: 0, recuperati: 0, totale: 0 });
+
+  return { rows: out, totals };
+}, [rows, agent, creator, client, q]);
+
+
   
   /* paginazione */
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
@@ -2238,6 +2377,10 @@ const cancellationDetailRows = useMemo(() => {
   // Inserisce un nuovo appuntamento su Supabase e aggiorna la tabella locale
   async function handleCreate(form) {
     try {
+      if (!form?.piva || String(form.piva).trim().length < 3) {
+        alert("La P.iva è obbligatoria.");
+        return false;
+      }
       const supabase = getSupabaseClient();
       const id = generateId();
 
@@ -2248,6 +2391,7 @@ const cancellationDetailRows = useMemo(() => {
 
         // prendi tutto dal form (include tipo_appuntamento)
         ...form,
+        piva: String(form.piva).trim(),
 
         // normalizzazioni minime
         città: form["città"] ?? form.citta ?? "",
@@ -2413,6 +2557,7 @@ function markRecupero(r) {
           data: parseExcelDate(r["Data Appuntamento"]) || null,
           ora: parseExcelTime(r["Ora Appuntamento"]) || "",
           azienda: r["Azienda"] || "",
+          piva: String(r["P.iva"] || "").trim(),
           referente: r["Referente"] || "",
           telefono: r["Telefono"] || "",
           email: r["Email"] || "",
@@ -2446,6 +2591,7 @@ function markRecupero(r) {
       "Data Appuntamento": r.data || "",
       "Ora Appuntamento": r.ora || "",
       Azienda: r.azienda || "",
+      "P.iva": r.piva || "",
       Referente: r.referente || "",
       Telefono: r.telefono || "",
       Email: r.email || "",
@@ -2736,6 +2882,15 @@ function markRecupero(r) {
           <KPI />
         </CardContent>
       </Card>
+
+      <Collapsible
+        title="📆 Oggi per cliente"
+        storageKey="coface:collapse:today-by-client"
+        defaultOpen={true}
+      >
+        <TodayByClientCard data={todayByClient} />
+      </Collapsible>
+
 
       {/* Leaderboard Operatori – collassabile, Mese/Anno, % annullati */}
       <Collapsible
