@@ -48,12 +48,15 @@ const STATUSES = [
   { value: "annullato", label: "Annullato" },
   { value: "recuperato", label: "Recuperato" },
 ];
+// Clienti "canonici" sempre visibili nel modale Nuovo
 const CLIENTI_CANONICI = [
   "Coface",
   "Credit Partner",
   "Credit Solution",
   "General Service",
+  "TCI PADOVA",
 ];
+
 
 const CLEAR_ALL_PASSWORD = "Password.2";
 const EDIT_PASSWORD = "123"; // ⬅️ password operativa per modifiche/annulli/cancellazioni
@@ -398,12 +401,35 @@ function makeEmailAgente(r) {
     `${r?.operatore || ""}`,
   ].join("\n");
 
-  const to = getAgentEmail(r) || "";
-  const cc = ["arturo.antacido@coface.com", "customersuccess.italy@coface.com", "cofaceappuntamenti@apemo.net " ];
-  const bcc = ["tlcoface@contaq.it"];
+  // cliente speciale
+  const isTCI = String(r?.cliente || "").trim().toUpperCase() === "TCI PADOVA";
+
+  // default
+  let to = getAgentEmail(r) || "";
+  let cc = [
+    "arturo.antacido@coface.com",
+    "customersuccess.italy@coface.com",
+    "cofaceappuntamenti@apemo.net",
+  ];
+  let bcc = ["tlcoface@contaq.it"];
+
+  // override per TCI PADOVA
+  if (isTCI) {
+    to = ["andrea.fabiani@coface.it", "andrea.bottazzin@coface.it"];
+    cc = [
+      "paolo.amenta@coface.it",
+      "Ivan.Ciociano@coface.it",
+      "cristian.annovazzi@coface.com",
+      "customersuccess.italy@coface.com",
+      "arturo.antacido@coface.com",
+      "cofaceappuntamenti@apemo.net",
+    ];
+    // bcc invariato
+  }
 
   return { to, cc, bcc, subject, body };
 }
+
 
 function makeEmailAzienda(r) {
   const dataGGMM = fmtDate(r?.data); // formato gg/mm/aaaa
@@ -431,12 +457,27 @@ function makeEmailAzienda(r) {
     `Numero Verde: 800 600 880`,
   ].join("\n");
 
-  const to = r?.email || ""; // email azienda dal record
-  const cc = [getAgentEmail(r), "arturo.antacido@coface.com"].filter(Boolean);
-  const bcc = ["tlcoface@contaq.it"];
+  // TO invariato (email azienda dal record)
+  const to = r?.email || "";
+
+  // default CC/BCC
+  let cc = [getAgentEmail(r), "arturo.antacido@coface.com"].filter(Boolean);
+  let bcc = ["tlcoface@contaq.it"];
+
+  // override per TCI PADOVA: cambia solo il CC
+  const isTCI = String(r?.cliente || "").trim().toUpperCase() === "TCI PADOVA";
+  if (isTCI) {
+    cc = [
+      "andrea.fabiani@coface.it",
+      "andrea.bottazzin@coface.it",
+      "arturo.antacido@coface.com",
+    ];
+    // to e bcc invariati
+  }
 
   return { to, cc, bcc, subject, body };
 }
+
 
 // ✉️ Email ANNULLO (mantieni gg/mm/aaaa) — destinatario: agente; CC/BCC come email agente
 function makeEmailAnnullo(r) {
@@ -3060,7 +3101,7 @@ function markRecupero(r) {
         open={createOpen}
         setOpen={setCreateOpen}
         onCreate={handleCreate}
-        clientiOpzioni={clients.slice(1)}
+        clientOptions={clients.slice(1)}
         canInsert={canInsert}
       />
     </div>
