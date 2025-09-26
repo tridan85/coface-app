@@ -647,23 +647,25 @@ function Editor({
             </div>
 
             <div>
-              <Label className="text-xs">Tipo appuntamento</Label>
-              <Select
-                value={r.tipo_appuntamento || ""}
-                onValueChange={(v) => {
-                  setEditing({ ...r, tipo_appuntamento: v });
-                  updateRow(r.id, { tipo_appuntamento: v });
-                }}
-                disabled={locked}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Seleziona" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="in_sede">In sede</SelectItem>
-                  <SelectItem value="videocall">Videocall</SelectItem>
-                </SelectContent>
-              </Select>
+            <Label>Tipo appuntamento</Label>
+            <Select
+              value={r.tipo_appuntamento ?? ""}
+              onValueChange={(v) => {
+                // normalizza: 'in_sede' -> 'sede'
+                const norm = v === "in_sede" ? "sede" : v;
+                setEditing({ ...r, tipo_appuntamento: norm });
+                updateRow(r.id, { tipo_appuntamento: norm });
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Seleziona tipo appuntamento" />
+              </SelectTrigger>
+              <SelectContent>
+                {/* usa direttamente 'sede' come valore */}
+                <SelectItem value="sede">In sede</SelectItem>
+                <SelectItem value="videocall">Videocall</SelectItem>
+              </SelectContent>
+            </Select>
             </div>
 
             <div className="md:col-span-2">
@@ -2439,47 +2441,57 @@ const todayByClient = useMemo(() => {
     setCreateOpen(true);
   }
 
-  // Inserisce un nuovo appuntamento su Supabase e aggiorna la tabella locale
-  async function handleCreate(form) {
-    try {
-      if (!form?.piva || String(form.piva).trim().length < 3) {
-        alert("La P.iva è obbligatoria.");
-        return false;
-      }
-      const supabase = getSupabaseClient();
-      const id = generateId();
 
-      const jsRow = {
-        id,
-        dataInserimento: todayISO(),
-        oraInserimento: nowHM(),
-
-        // prendi tutto dal form (include tipo_appuntamento)
-        ...form,
-        piva: String(form.piva).trim(),
-
-        // normalizzazioni minime
-        città: form["città"] ?? form.citta ?? "",
-        data: form.data || null,
-        stato: form.stato || "programmato",
-        fatturato: !!form.fatturato,
-
-        // se l’utente non sceglie niente, salva null
-        tipo_appuntamento: form.tipo_appuntamento || null,
-      };
-
-      const payload = rowToDb(jsRow); // mappa solo “città” -> citta
-      const { error } = await supabase.from("appointments").insert(payload);
-      if (error) throw error;
-
-      setRows((prev) => [jsRow, ...prev]);
-      return true;
-    } catch (e) {
-      console.error("Create error", e?.message || e);
-      alert("Errore durante la creazione");
+  
+// --- handleCreate: versione che salva 'sede' | 'videocall' ---
+async function handleCreate(form) {
+  try {
+    if (!form?.piva || String(form.piva).trim().length < 3) {
+      alert("La P.iva è obbligatoria.");
       return false;
     }
+
+    // normalizza il tipo (accetta varianti e le porta a 'sede' o 'videocall')
+    const normalizeTipo = (v) => {
+      const key = String(v ?? "")
+        .normalize("NFKC")
+        .replace(/\u00A0/g, " ")
+        .replace(/_/g, " ")
+        .trim()
+        .replace(/\s+/g, " ")
+        .toLowerCase();
+      if (key === "sede" || key === "in sede") return "sede";
+      if (key === "videocall" || key === "video call" || key === "video-call") return "videocall";
+      return null;
+    };
+
+    const tipoNorm = normalizeTipo(form?.tipo_appuntamento);
+
+    const jsRow = {
+      id: generateId(),
+      dataInserimento: todayISO(),
+      oraInserimento: nowHM(),
+      ...form,
+      piva: String(form.piva).trim(),
+      città: form["città"] ?? form.citta ?? "",
+      stato: form.stato || "programmato",
+      fatturato: !!form.fatturato,
+      tipo_appuntamento: tipoNorm,        // <— ora 'sede' | 'videocall' | null
+    };
+
+    const payload = rowToDb(jsRow);
+
+    const { error } = await supabase.from("appointments").insert(payload);
+    if (error) throw error;
+
+    setRows((prev) => [jsRow, ...prev]);   // ottimismo lato UI
+    return true;
+  } catch (e) {
+    console.error("Create error", e?.message || e);
+    alert("Errore durante la creazione");
+    return false;
   }
+}
 
   async function _updateRow(id, patch) {
     const { data, error } = await supabase
@@ -2762,7 +2774,7 @@ function markRecupero(r) {
     }[r.stato] || "";
 
     const tipoLabel =
-      r.tipo_appuntamento === "in_sede" ? "In sede" :
+      r.tipo_appuntamento === "sede" ? "In sede" :
       r.tipo_appuntamento === "videocall" ? "Videocall" :
       "—";
 
