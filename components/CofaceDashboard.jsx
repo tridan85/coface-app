@@ -2101,44 +2101,81 @@ export default function CofaceAppuntamentiDashboard() {
   useEffect(() => {
     let mounted = true;
 
-    (async () => {
-      const { data, error } = await supabase
-        .from("appointments")
-        .select("*")
-        .order("dataInserimento", { ascending: true })
-        .order("oraInserimento", { ascending: true });
+    // --- 1) Primo fetch (limita a ultimi 120 giorni; togli la riga .gte(...) se vuoi tutto) ---
+    const days = 120;
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    const sinceISO = since.toISOString().slice(0, 10); // "YYYY-MM-DD"
 
-      if (!mounted) return;
+    const refresh = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("appointments")
+          .select("*")
+          .gte("dataInserimento", sinceISO) // rimuovi questa riga per tutto lo storico
+          .order("dataInserimento", { ascending: true })
+          .order("oraInserimento", { ascending: true });
 
-      if (error) {
-        console.error("Select error:", error);
-        alert("Errore lettura appuntamenti: " + error.message);
-        return;
+        if (!mounted) return;
+        if (error) {
+          console.error("Select error:", error);
+          return;
+        }
+        setRows((data ?? []).map(rowFromDb));
+      } catch (e) {
+        console.error("Select failed:", e);
       }
-      setRows((data || []).map(rowFromDb));
-    })();
+    };
+
+    refresh();
+
+    // --- 2) Realtime: applica solo il delta (niente refetch totale) ---
+    const inWindow = (r) => {
+      // se filtri per ultimi X giorni, mantiene coerenza quando un record entra/esce dal range
+      const d = r?.dataInserimento;
+      return !sinceISO || (d && d >= sinceISO);
+    };
 
     const ch = supabase
-      .channel("realtime:appointments")
+      .channel("rt:appointments")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "appointments" },
-        async () => {
-          const { data, error } = await supabase.from("appointments").select("*");
-          if (error) {
-            console.error("Realtime refresh error:", error);
-            return;
-          }
-          setRows((data || []).map(rowFromDb));
+        (payload) => {
+          setRows((prev) => {
+            if (payload.eventType === "INSERT") {
+              const r = rowFromDb(payload.new);
+              return inWindow(r) ? [r, ...prev] : prev;
+            }
+            if (payload.eventType === "UPDATE") {
+              const r = rowFromDb(payload.new);
+              const exists = prev.some((x) => x.id === r.id);
+              if (!inWindow(r)) return prev.filter((x) => x.id !== r.id); // uscito dal range
+              return exists ? prev.map((x) => (x.id === r.id ? r : x)) : [r, ...prev]; // entrato o aggiornato
+            }
+            if (payload.eventType === "DELETE") {
+              const id = payload.old?.id;
+              return prev.filter((x) => x.id !== id);
+            }
+            return prev;
+          });
         }
       )
       .subscribe();
+
+    // --- 3) Piccolo “refresh” quando torni sulla tab (facoltativo) ---
+    const onVis = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    document.addEventListener("visibilitychange", onVis);
+
     return () => {
       mounted = false;
-      supabase.removeChannel(ch);
+      try { supabase.removeChannel(ch); } catch {}
+      document.removeEventListener("visibilitychange", onVis);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
 
   /* ✅ AUTO: imposta "svolto" dopo 3 giorni dalla data appuntamento (se non già svolto/annullato) */
   const autoRunRef = useRef(false);
