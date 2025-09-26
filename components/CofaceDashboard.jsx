@@ -2110,12 +2110,12 @@ export default function CofaceAppuntamentiDashboard() {
 
       if (!mounted) return;
 
-      if (error) {
+      if (error != null && (error.message || error.code)) {
         console.error("Select error:", error);
-        alert("Errore lettura appuntamenti: " + error.message);
+        alert("Errore lettura appuntamenti: " + (error.message || ""));
         return;
       }
-      setRows((data || []).map(rowFromDb));
+      setRows((data ?? []).map(rowFromDb));
     })();
 
     const ch = supabase
@@ -2124,21 +2124,37 @@ export default function CofaceAppuntamentiDashboard() {
         "postgres_changes",
         { event: "*", schema: "public", table: "appointments" },
         async () => {
-          const { data, error } = await supabase.from("appointments").select("*");
-          if (error) {
-            console.error("Realtime refresh error:", error);
-            return;
+          try {
+            const { data, error: err } = await supabase
+              .from("appointments")
+              .select("*")
+              .order("dataInserimento", { ascending: true })
+              .order("oraInserimento", { ascending: true });
+
+            if (!mounted) return;
+
+            if (err != null && (err.message || err.code)) {
+              console.error("Realtime refresh error:", err);
+              return;
+            }
+
+            setRows((data ?? []).map(rowFromDb));
+          } catch (e) {
+            console.error("Realtime refresh fetch failed:", e);
           }
-          setRows((data || []).map(rowFromDb));
         }
       )
       .subscribe();
+
     return () => {
       mounted = false;
-      supabase.removeChannel(ch);
+      try {
+        supabase.removeChannel(ch);
+      } catch {}
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
 
   /* ✅ AUTO: imposta "svolto" dopo 3 giorni dalla data appuntamento (se non già svolto/annullato) */
   const autoRunRef = useRef(false);
@@ -2425,6 +2441,11 @@ const todayByClient = useMemo(() => {
       const supabase = getSupabaseClient();
       const id = generateId();
 
+      const tipoRaw = (form?.tipo_appuntamento ?? "").trim();
+      const tipoNorm = !tipoRaw
+        ? null
+        : (tipoRaw.toLowerCase() === "in_sede" ? "in sede" : tipoRaw);
+
       const jsRow = {
         id,
         dataInserimento: todayISO(),
@@ -2441,7 +2462,7 @@ const todayByClient = useMemo(() => {
         fatturato: !!form.fatturato,
 
         // se l’utente non sceglie niente, salva null
-        tipo_appuntamento: form.tipo_appuntamento || null,
+        tipo_appuntamento: tipoNorm,
       };
 
       const payload = rowToDb(jsRow); // mappa solo “città” -> citta
