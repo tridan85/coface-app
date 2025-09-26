@@ -2101,18 +2101,12 @@ export default function CofaceAppuntamentiDashboard() {
   useEffect(() => {
     let mounted = true;
 
-    // --- 1) Primo fetch (limita a ultimi 120 giorni; togli la riga .gte(...) se vuoi tutto) ---
-    const days = 120;
-    const since = new Date();
-    since.setDate(since.getDate() - days);
-    const sinceISO = since.toISOString().slice(0, 10); // "YYYY-MM-DD"
-
+    // 1) Primo fetch: TUTTO lo storico (nessun filtro)
     const refresh = async () => {
       try {
         const { data, error } = await supabase
           .from("appointments")
           .select("*")
-          .gte("dataInserimento", sinceISO) // rimuovi questa riga per tutto lo storico
           .order("dataInserimento", { ascending: true })
           .order("oraInserimento", { ascending: true });
 
@@ -2129,13 +2123,7 @@ export default function CofaceAppuntamentiDashboard() {
 
     refresh();
 
-    // --- 2) Realtime: applica solo il delta (niente refetch totale) ---
-    const inWindow = (r) => {
-      // se filtri per ultimi X giorni, mantiene coerenza quando un record entra/esce dal range
-      const d = r?.dataInserimento;
-      return !sinceISO || (d && d >= sinceISO);
-    };
-
+    // 2) Realtime: applica SOLO il delta (niente refetch globale)
     const ch = supabase
       .channel("rt:appointments")
       .on(
@@ -2145,13 +2133,12 @@ export default function CofaceAppuntamentiDashboard() {
           setRows((prev) => {
             if (payload.eventType === "INSERT") {
               const r = rowFromDb(payload.new);
-              return inWindow(r) ? [r, ...prev] : prev;
+              return [r, ...prev];
             }
             if (payload.eventType === "UPDATE") {
               const r = rowFromDb(payload.new);
               const exists = prev.some((x) => x.id === r.id);
-              if (!inWindow(r)) return prev.filter((x) => x.id !== r.id); // uscito dal range
-              return exists ? prev.map((x) => (x.id === r.id ? r : x)) : [r, ...prev]; // entrato o aggiornato
+              return exists ? prev.map((x) => (x.id === r.id ? r : x)) : [r, ...prev];
             }
             if (payload.eventType === "DELETE") {
               const id = payload.old?.id;
@@ -2163,7 +2150,7 @@ export default function CofaceAppuntamentiDashboard() {
       )
       .subscribe();
 
-    // --- 3) Piccolo “refresh” quando torni sulla tab (facoltativo) ---
+    // 3) (facoltativo) piccolo refresh quando torni sulla tab
     const onVis = () => {
       if (document.visibilityState === "visible") refresh();
     };
