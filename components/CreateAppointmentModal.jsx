@@ -14,26 +14,13 @@ import {
 } from "@/components/select";
 import { Calendar, Plus } from "lucide-react";
 
-/**
- * Props suggerite:
- * - open: boolean
- * - setOpen: (bool) => void
- * - onCreate: async (payload) => Promise<boolean | void>
- * - clientOptions?: string[]              // opzionale: elenco clienti
- * - appointmentTypeOptions?: string[]     // opzionale: ["in sede","videocall",...]
- */
 export default function CreateAppointmentModal({
   open,
   setOpen,
   onCreate,
   clientOptions = [],
-  appointmentTypeOptions = ["in sede", "videocall"],
 }) {
   const [saving, setSaving] = useState(false);
-
-  // ----------------------
-  // Stato iniziale del form
-  // ----------------------
   const [f, setF] = useState({
     idContaq: "",
     data: "",
@@ -55,9 +42,6 @@ export default function CreateAppointmentModal({
     tipo_appuntamento: "",
   });
 
-  // ----------------------
-  // Campi obbligatori
-  // ----------------------
   const REQUIRED_KEYS = {
     data: "Data appuntamento",
     ora: "Ora appuntamento",
@@ -76,10 +60,7 @@ export default function CreateAppointmentModal({
     note: "Note",
     tipo_appuntamento: "Tipo appuntamento",
   };
-
-  // ----------------------
-  // Helpers
-  // ----------------------
+  
   const ch =
     (k) =>
     (e) => {
@@ -95,7 +76,6 @@ export default function CreateAppointmentModal({
         return false;
       }
     }
-    // P.iva: lunghezza minima soft (evita spazi)
     if ((f.piva || "").trim().length < 3) {
       alert("La P.iva è obbligatoria.");
       return false;
@@ -131,7 +111,6 @@ export default function CreateAppointmentModal({
     try {
       setSaving(true);
       const ok = await onCreate?.(f);
-      // se onCreate non lancia errori, chiudo
       if (ok !== false) {
         reset();
         setOpen(false);
@@ -148,7 +127,6 @@ export default function CreateAppointmentModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div className="w-[min(980px,92vw)] rounded-2xl bg-white shadow-xl">
-        {/* Header */}
         <div className="sticky top-0 z-10 flex items-center justify-between border-b p-4">
           <div className="flex items-center gap-2">
             <Plus className="h-5 w-5" />
@@ -156,9 +134,7 @@ export default function CreateAppointmentModal({
           </div>
         </div>
 
-        {/* Body */}
         <div className="p-4 space-y-4">
-          {/* Prima riga: data/ora */}
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
               <Label>Data appuntamento</Label>
@@ -178,7 +154,6 @@ export default function CreateAppointmentModal({
             </div>
           </div>
 
-          {/* Azienda / Referente / Telefono / Email / P.iva */}
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
               <Label>Azienda</Label>
@@ -217,7 +192,6 @@ export default function CreateAppointmentModal({
             </div>
           </div>
 
-          {/* Regione / Provincia */}
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
               <Label>Regione</Label>
@@ -229,7 +203,6 @@ export default function CreateAppointmentModal({
             </div>
           </div>
 
-          {/* Operatore / Agente / Cliente */}
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <div>
               <Label>Operatore</Label>
@@ -249,8 +222,7 @@ export default function CreateAppointmentModal({
                   <SelectValue placeholder="Seleziona cliente" />
                 </SelectTrigger>
                 <SelectContent>
-                  {(clientOptions?.length ? clientOptions : ["Coface"]).map(
-                    (c) => (
+                  {(clientOptions?.length ? clientOptions : ["Coface"]).map((c) => (
                       <SelectItem key={c} value={c}>
                         {c}
                       </SelectItem>
@@ -260,24 +232,20 @@ export default function CreateAppointmentModal({
               </Select>
             </div>
           </div>
-
-          {/* Tipo appuntamento / ID Contaq */}
+          
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
               <Label>Tipo appuntamento</Label>
               <Select
                 value={f.tipo_appuntamento}
-                onValueChange={(v) => ch("tipo_appuntamento")(v)}
+                onValueChange={(v) => setF((s) => ({ ...s, tipo_appuntamento: v }))}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Seleziona tipo appuntamento" />
                 </SelectTrigger>
                 <SelectContent>
-                  {appointmentTypeOptions.map((t) => (
-                    <SelectItem key={t} value={t}>
-                      {t}
-                    </SelectItem>
-                  ))}
+                  <SelectItem value="in_sede">In sede</SelectItem>
+                  <SelectItem value="videocall">Videocall</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -287,21 +255,18 @@ export default function CreateAppointmentModal({
               <Input value={f.idContaq} onChange={ch("idContaq")} />
             </div>
           </div>
-
-          {/* Note */}
+          
           <div>
             <Label>Note</Label>
             <Input value={f.note} onChange={ch("note")} required />
           </div>
 
-          {/* Indirizzo */}
           <div>
             <Label>Indirizzo (solo interno)</Label>
             <Input value={f.indirizzo} onChange={ch("indirizzo")} required />
           </div>
         </div>
 
-        {/* Footer */}
         <div className="border-t p-4 flex items-center justify-end gap-2">
           <Button variant="outline" onClick={() => setOpen(false)}>
             Annulla
