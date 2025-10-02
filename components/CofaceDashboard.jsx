@@ -275,6 +275,44 @@ const toNull = (v) => (v === "" || v === undefined ? null : v);
     };
   }
 
+    // ⬇️ Mappa SOLO le chiavi presenti nel patch dalla UI al DB
+  function patchToDb(patch = {}) {
+    const out = {};
+
+    // usa toNull già definito sopra nel file
+    // rinomina "città" -> citta se presente nel patch
+    if ("città" in patch || "citta" in patch) out.citta = patch["città"] ?? patch.citta;
+
+    // chiavi con lo stesso nome tra UI e DB: copiale solo se presenti nel patch
+    const same = [
+      "id","dataInserimento","oraInserimento","data","ora","azienda","referente",
+      "telefono","email","piva","indirizzo","provincia","agente","operatore",
+      "cliente","stato","note","idContaq","fatturato","confermato"
+    ];
+    for (const k of same) if (k in patch) out[k] = patch[k];
+
+    // date che vanno a null se stringa vuota
+    if ("dataAnnullamento" in patch) out.dataAnnullamento = toNull(patch.dataAnnullamento);
+    if ("dataFatturazione" in patch) out.dataFatturazione = toNull(patch.dataFatturazione);
+
+    // normalizza tipo appuntamento SOLO se presente nel patch
+    if ("tipo_appuntamento" in patch || "tipoAppuntamento" in patch) {
+      const raw = patch.tipo_appuntamento ?? patch.tipoAppuntamento ?? "";
+      const key = String(raw)
+        .normalize("NFKC")
+        .replace(/\u00A0/g, " ")
+        .replace(/_/g, " ")
+        .trim()
+        .replace(/\s+/g, " ")
+        .toLowerCase();
+      if (key === "sede" || key === "in sede") out.tipo_appuntamento = "sede";
+      else if (["videocall","video call","video-call"].includes(key)) out.tipo_appuntamento = "videocall";
+      else out.tipo_appuntamento = null;
+    }
+
+    return out;
+  }
+
 
 /* Excel headers del template */
 const DEFAULT_HEADERS = [
@@ -2182,6 +2220,8 @@ export default function CofaceAppuntamentiDashboard() {
   const [annMonth, setAnnMonth] = useState(now.getMonth() + 1); // 1..12
   const [annYear,  setAnnYear]  = useState(now.getFullYear());
 
+  
+
   // Primo fetch (pubblico) + realtime
   useEffect(() => {
     let mounted = true;
@@ -2605,11 +2645,13 @@ const todayByClient = useMemo(() => {
 
 
   async function _updateRow(id, patch) {
+    const dbPatch = patchToDb(patch);
     const { data, error } = await supabase
       .from("appointments")
-      .update(rowToDb(patch))
+      .update(dbPatch)
       .eq("id", id)
       .select("id");
+
     if (error) {
       alert(`Errore salvataggio: ${error.message}`);
       return false;
@@ -2618,9 +2660,12 @@ const todayByClient = useMemo(() => {
       alert("Permesso negato (RLS)");
       return false;
     }
+
+    // aggiorna lo stato locale solo con le chiavi toccate
     setRows((p) => p.map((r) => (r.id === id ? { ...r, ...patch } : r)));
     return true;
   }
+
 
   async function updateRowSecure(id, patch) {
     if (!ensureEditPassword()) return false;
