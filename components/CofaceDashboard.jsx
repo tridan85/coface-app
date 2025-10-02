@@ -172,26 +172,109 @@ function generateId() {
   return (Date.now().toString(36) + Math.random().toString(36).slice(2, 8)).toUpperCase();
 }
 
-/* mapping JS <-> DB */
-function rowFromDb(db) {
-  return {
-    ...db,
-    piva: db.piva ?? "",
-    // UI: "città" (accentata) ←→ DB: citta
-    città: db.citta ?? "",
-    // UI espone direttamente la chiave DB corretta (niente camel)
-    tipo_appuntamento: db.tipo_appuntamento ?? db.tipoappuntamento ?? null,
-  };
-}
+  // DB -> UI
+  function rowFromDb(db) {
+    const dataInserimento =
+      db.dataInserimento ?? db.datainserimento ?? db.data_inserimento ?? null;
+    const oraInserimento =
+      db.oraInserimento ?? db.orainserimento ?? db.ora_inserimento ?? "";
+
+    // normalizza tipo per la UI (sede | videocall | null)
+    const tipoNorm = (() => {
+      const k = String(db.tipo_appuntamento ?? "")
+        .normalize("NFKC")
+        .replace(/\u00A0/g, " ")   // NBSP -> spazio
+        .replace(/_/g, " ")        // underscore -> spazio
+        .trim()
+        .replace(/\s+/g, " ")      // spazi multipli -> singolo
+        .toLowerCase();
+      if (!k) return null;
+      if (k === "sede" || k === "in sede") return "sede";
+      if (k === "videocall" || k === "video call" || k === "video-call") return "videocall";
+      return null;
+    })();
+
+    return {
+      id: db.id,
+      dataInserimento,
+      oraInserimento,
+
+      data: db.data ?? null,
+      ora: db.ora ?? "",
+      azienda: db.azienda ?? "",
+      referente: db.referente ?? "",
+      telefono: db.telefono ?? "",
+      email: db.email ?? "",
+      piva: db.piva ?? "",
+      indirizzo: db.indirizzo ?? "",
+      città: db.citta ?? db["città"] ?? "",
+      provincia: db.provincia ?? "",
+      agente: db.agente ?? "",
+      operatore: db.operatore ?? "",
+      cliente: db.cliente ?? "Coface",
+      stato: db.stato ?? "programmato",
+      tipo_appuntamento: tipoNorm,
+      note: db.note ?? "",
+      idContaq: db.idContaq ?? "",
+      dataAnnullamento: db.dataAnnullamento ?? null,
+      dataFatturazione: db.dataFatturazione ?? null,
+      fatturato: !!db.fatturato,
+      confermato: !!db.confermato,
+
+      created_at: db.created_at ?? null,
+      updated_at: db.updated_at ?? null,
+    };
+  }
+
 const toNull = (v) => (v === "" || v === undefined ? null : v);
-// mappa solo i campi speciali; il resto passa così com'è
-function rowToDb(js) {
-  const { città, tipoAppuntamento, ...rest } = js || {}; // scarta eventuale camel
-  return {
-    ...rest,             // include tipo_appuntamento se presente
-    citta: città ?? "",  // mapping UI->DB
-  };
-}
+  // UI -> DB
+  function rowToDb(js) {
+    // normalizza tipo per il DB (sede | videocall | null)
+    const tipoNorm = (() => {
+      const k = String(js?.tipo_appuntamento ?? js?.tipoAppuntamento ?? "")
+        .normalize("NFKC")
+        .replace(/\u00A0/g, " ")
+        .replace(/_/g, " ")
+        .trim()
+        .replace(/\s+/g, " ")
+        .toLowerCase();
+      if (!k) return null;
+      if (k === "sede" || k === "in sede") return "sede";
+      if (k === "videocall" || k === "video call" || k === "video-call") return "videocall";
+      return null;
+    })();
+
+    return {
+      id: js.id,
+
+      // 👉 usa i nomi REALI delle colonne nel DB (minuscolo)
+      dataInserimento: js.dataInserimento ?? null,
+      oraInserimento: js.oraInserimento ?? "",
+
+      data: js.data ?? null,
+      ora: js.ora ?? "",
+      azienda: js.azienda ?? "",
+      referente: js.referente ?? "",
+      telefono: js.telefono ?? "",
+      email: js.email ?? "",
+      piva: js.piva ?? "",
+      indirizzo: js.indirizzo ?? "",
+      citta: js["città"] ?? js.citta ?? "",
+      provincia: js.provincia ?? "",
+      agente: js.agente ?? "",
+      operatore: js.operatore ?? "",
+      cliente: js.cliente ?? "Coface",
+      stato: js.stato ?? "programmato",
+      tipo_appuntamento: tipoNorm,
+      note: js.note ?? "",
+      idContaq: js.idContaq ?? "",
+      dataAnnullamento: js.dataAnnullamento ?? null,
+      dataFatturazione: js.dataFatturazione ?? null,
+      fatturato: !!js.fatturato,
+      confermato: !!js.confermato,
+    };
+  }
+
 
 /* Excel headers del template */
 const DEFAULT_HEADERS = [
@@ -2106,20 +2189,31 @@ export default function CofaceAppuntamentiDashboard() {
     // 1) Primo fetch: TUTTO lo storico (nessun filtro)
     const refresh = async () => {
       try {
-        const { data, error } = await supabase
-          .from("appointments")
-          .select("*")
-          .order("dataInserimento", { ascending: true })
-          .order("oraInserimento", { ascending: true });
+      const { data, error } = await supabase
+        .from("appointments")
+        .select("*")
+        .order("dataInserimento", { ascending: false })   // più recenti prima
+        .order("oraInserimento",  { ascending: false })   // più recenti prima
+        .range(0, 1999);                                  // prendi fino a 2000 righe
+
+        // DEBUG: rimuovi quando hai finito
+        console.log(
+          "FETCH rows:",
+          data?.length,
+          "esempi:",
+          (data || []).slice(0, 5).map((r) => r.id)
+        );
 
         if (!mounted) return;
-        if (error) {
+        if (error != null && (error.message || error.code)) {
           console.error("Select error:", error);
+          alert("Errore lettura appuntamenti: " + (error.message || error.code));
           return;
         }
         setRows((data ?? []).map(rowFromDb));
       } catch (e) {
         console.error("Select failed:", e);
+        alert("Errore lettura appuntamenti: " + (e?.message || e));
       }
     };
 
@@ -2135,7 +2229,7 @@ export default function CofaceAppuntamentiDashboard() {
           setRows((prev) => {
             if (payload.eventType === "INSERT") {
               const r = rowFromDb(payload.new);
-              return [r, ...prev];
+              return prev.some((x) => x.id === r.id) ? prev : [r, ...prev];
             }
             if (payload.eventType === "UPDATE") {
               const r = rowFromDb(payload.new);
@@ -2164,7 +2258,6 @@ export default function CofaceAppuntamentiDashboard() {
       document.removeEventListener("visibilitychange", onVis);
     };
   }, []);
-
 
   /* ✅ AUTO: imposta "svolto" dopo 3 giorni dalla data appuntamento (se non già svolto/annullato) */
   const autoRunRef = useRef(false);
@@ -2443,55 +2536,73 @@ const todayByClient = useMemo(() => {
 
 
   
-// --- handleCreate: versione che salva 'sede' | 'videocall' ---
-async function handleCreate(form) {
-  try {
-    if (!form?.piva || String(form.piva).trim().length < 3) {
-      alert("La P.iva è obbligatoria.");
+  // --- CREA NUOVO APPUNTAMENTO (con ritorno dal DB + dedup) ---
+  async function handleCreate(form) {
+    try {
+      if (!form?.piva || String(form.piva).trim().length < 3) {
+        alert("La P.iva è obbligatoria.");
+        return false;
+      }
+
+      // normalizza tipo per il DB ('sede' | 'videocall' | null)
+      const normalizeTipo = (v) => {
+        const key = String(v ?? "")
+          .normalize("NFKC")
+          .replace(/\u00A0/g, " ")
+          .replace(/_/g, " ")
+          .trim()
+          .replace(/\s+/g, " ")
+          .toLowerCase();
+        if (key === "sede" || key === "in sede") return "sede";
+        if (key === "videocall" || key === "video call" || key === "video-call") return "videocall";
+        return null;
+      };
+      const tipoNorm = normalizeTipo(form?.tipo_appuntamento);
+
+      // riga lato UI (coerente con il resto dell'app)
+      const jsRow = {
+        id: generateId(),
+        dataInserimento: todayISO(),
+        oraInserimento: nowHM(),
+        ...form,
+        piva: String(form.piva).trim(),
+        città: form["città"] ?? form.citta ?? "",
+        stato: form.stato || "programmato",
+        fatturato: !!form.fatturato,
+        tipo_appuntamento: tipoNorm,
+      };
+
+      // mapping verso i nomi di colonna del DB
+      const payload = rowToDb(jsRow);
+
+      // 👉 chiediamo a Supabase di ritornare la riga inserita
+      const { data, error } = await supabase
+        .from("appointments")
+        .insert(payload)
+        .select("*")
+        .single();
+
+      if (error) {
+        console.error("Insert error:", error);
+        alert("Errore durante la creazione: " + (error.message || "insert failed"));
+        return false;
+      }
+
+      // usiamo la riga del DB (garantisce coerenza totale)
+      const serverRow = rowFromDb(data);
+
+      setRows((prev) =>
+        prev.some((x) => x.id === serverRow.id) ? prev : [serverRow, ...prev]
+      );
+
+      return true;
+    } catch (e) {
+      console.error("Create error", e?.message || e);
+      alert("Errore durante la creazione");
       return false;
     }
-
-    // normalizza il tipo (accetta varianti e le porta a 'sede' o 'videocall')
-    const normalizeTipo = (v) => {
-      const key = String(v ?? "")
-        .normalize("NFKC")
-        .replace(/\u00A0/g, " ")
-        .replace(/_/g, " ")
-        .trim()
-        .replace(/\s+/g, " ")
-        .toLowerCase();
-      if (key === "sede" || key === "in sede") return "sede";
-      if (key === "videocall" || key === "video call" || key === "video-call") return "videocall";
-      return null;
-    };
-
-    const tipoNorm = normalizeTipo(form?.tipo_appuntamento);
-
-    const jsRow = {
-      id: generateId(),
-      dataInserimento: todayISO(),
-      oraInserimento: nowHM(),
-      ...form,
-      piva: String(form.piva).trim(),
-      città: form["città"] ?? form.citta ?? "",
-      stato: form.stato || "programmato",
-      fatturato: !!form.fatturato,
-      tipo_appuntamento: tipoNorm,        // <— ora 'sede' | 'videocall' | null
-    };
-
-    const payload = rowToDb(jsRow);
-
-    const { error } = await supabase.from("appointments").insert(payload);
-    if (error) throw error;
-
-    setRows((prev) => [jsRow, ...prev]);   // ottimismo lato UI
-    return true;
-  } catch (e) {
-    console.error("Create error", e?.message || e);
-    alert("Errore durante la creazione");
-    return false;
   }
-}
+
 
   async function _updateRow(id, patch) {
     const { data, error } = await supabase
