@@ -529,7 +529,6 @@ function makeEmailAgente(r) {
   let to = getAgentEmail(r) || "";
   let cc = [
     "arturo.antacido@coface.com",
-    "customersuccess.italy@coface.com",
     "cofaceappuntamenti@apemo.net",
   ];
   let bcc = ["tlcoface@contaq.it"];
@@ -541,7 +540,6 @@ function makeEmailAgente(r) {
       "paolo.amenta@coface.it",
       "Ivan.Ciociano@coface.it",
       "cristian.annovazzi@coface.com",
-      "customersuccess.italy@coface.com",
       "arturo.antacido@coface.com",
       "cofaceappuntamenti@apemo.net",
     ];
