@@ -55,11 +55,27 @@ const CLIENTI_CANONICI = [
   "Credit Solution",
   "General Service",
   "TCI PADOVA",
+  "TCI BRESCIA 2",
+  "TCI MILANO 4",
+  "TCI MACERATA",
+  "TCI CATANIA",
 ];
 
 
 const CLEAR_ALL_PASSWORD = "Password.2";
 const EDIT_PASSWORD = "123"; // ⬅️ password operativa per modifiche/annulli/cancellazioni
+
+// Normalizza i nomi: "mARIO roSSI" -> "Mario Rossi"
+function titleCase(s = "") {
+  return String(s)
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : ""))
+    .join(" ");
+}
+
 
 // ---- FIX DATE: helper che restituisce yyyy-mm-dd in LOCALE (no UTC) ----
 function dateToLocalISO(d) {
@@ -425,11 +441,25 @@ function openEmail({ to, cc, bcc, subject, body }) {
 /* ────────────────────────────────────────────────────────────── */
 
 function tipoLabel(r) {
-  const t = r?.tipo_appuntamento;
-  if (t === "in_sede") return "in sede";
-  if (t === "videocall") return "videocall";
+  const raw =
+    r?.tipo_appuntamento ??
+    r?.tipoAppuntamento ??
+    r?.tipo ??
+    "";
+
+  const k = String(raw)
+    .normalize("NFKC")
+    .replace(/\u00A0/g, " ")
+    .replace(/_/g, " ")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+
+  if (k === "sede" || k === "in sede") return "in sede";
+  if (k === "videocall" || k === "video call" || k === "video-call") return "in videocall";
   return "";
 }
+
 
 /** normalizza un nome rimuovendo accenti, doppie spaziature e portando a lowercase */
 function normalizeName(s) {
@@ -688,11 +718,11 @@ function Editor({
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
             <div>
               <Label className="text-xs">Data inserimento</Label>
-              <Input type="date" value={r.dataInserimento || ""} disabled />
+              <Input type="date" {...commonInputProps("dataInserimento")} />
             </div>
             <div>
               <Label className="text-xs">Ora inserimento</Label>
-              <Input type="time" value={r.oraInserimento || ""} disabled />
+              <Input type="time" {...commonInputProps("oraInserimento")} />
             </div>
             <div>
               <Label className="text-xs">Data appuntamento</Label>
@@ -2327,10 +2357,18 @@ export default function CofaceAppuntamentiDashboard() {
   }, [rows]);
 
   /* liste dinamiche */
-  const agents = useMemo(
-    () => ["tutti", ...Array.from(new Set(rows.map((r) => r.agente).filter(Boolean))).sort((a, b) => a.localeCompare(b))],
-    [rows]
+const agents = useMemo(() => {
+  const uniqLower = Array.from(
+    new Set(
+      rows
+        .map((r) => (r.agente || "").toLowerCase().replace(/\s+/g, " ").trim())
+        .filter(Boolean)
+    )
   );
+  const display = uniqLower.map(titleCase);
+  return ["tutti", ...display.sort((a, b) => a.localeCompare(b))];
+}, [rows]);
+
   const creators = useMemo(
     () => ["tutti", ...Array.from(new Set(rows.map((r) => r.operatore).filter(Boolean).map(s => s.toLowerCase()))).sort((a, b) => a.localeCompare(b))],
     [rows]
@@ -3186,7 +3224,7 @@ function markRecupero(r) {
                 value={sortBy}
                 onValueChange={(v) => { setSortBy(v); setPage(1); }}
               >
-                <SelectTrigger className="w:[220px] md:w-[220px]">
+                <SelectTrigger className="w-[220px] md:w-[220px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -3198,7 +3236,7 @@ function markRecupero(r) {
                 value={sortDir}
                 onValueChange={(v) => { setSortDir(v); setPage(1); }}
               >
-                <SelectTrigger className="w:[160px] md:w-[160px]">
+                <SelectTrigger className="w-[160px] md:w-[160px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
