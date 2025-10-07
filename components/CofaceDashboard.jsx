@@ -168,6 +168,37 @@ function csvSafe(v) {
     ? `"${s.replace(/"/g, '""')}"`
     : s;
 }
+
+async function exportAllCSV() {
+  try {
+    setIsExporting?.(true);
+    const allRows = await fetchAllAppointmentsPaged(1000);
+    const csv = toCSV(allRows);
+    downloadFile(csv, `coface_appuntamenti_ALL_${todayISO()}.csv`, "text/csv;charset=utf-8");
+  } catch (e) {
+    console.error("Export CSV (ALL) error:", e);
+    alert("Errore durante l'esportazione completa in CSV.");
+  } finally {
+    setIsExporting?.(false);
+  }
+}
+
+async function exportAllExcel() {
+  try {
+    setIsExporting?.(true);
+    const allRows = await fetchAllAppointmentsPaged(1000);
+    const wb = toExcelWorkbook(allRows); // riusa il tuo builder esistente
+    const blob = workbookToBlob(wb);     // o equivalente utility che già usi
+    downloadBlob(blob, `coface_appuntamenti_ALL_${todayISO()}.xlsx`);
+  } catch (e) {
+    console.error("Export Excel (ALL) error:", e);
+    alert("Errore durante l'esportazione completa in Excel.");
+  } finally {
+    setIsExporting?.(false);
+  }
+}
+
+
 function aggregateByMonth(rows, dateKey) {
   const map = new Map();
   for (const r of rows) {
@@ -328,6 +359,30 @@ const toNull = (v) => (v === "" || v === undefined ? null : v);
 
     return out;
   }
+
+// Scarica tutto il DB a pagine da 1000
+async function fetchAllAppointmentsPaged(pageSize = 1000) {
+  let from = 0;
+  const all = [];
+  for (;;) {
+    const { data, error } = await supabase
+      .from("appuntamenti")
+      .select("*")
+      .order("id", { ascending: true }) // ordina per chiave stabile
+      .range(from, from + pageSize - 1);
+
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+
+    // mapping DB -> UI
+    for (const d of data) all.push(rowFromDb(d));
+
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
 
 
 /* Excel headers del template */

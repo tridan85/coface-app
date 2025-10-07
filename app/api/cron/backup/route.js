@@ -1,12 +1,12 @@
 // app/api/cron/backup/route.js
+export const runtime = "nodejs"; // assicura runtime Node (serve per googleapis/stream)
+
 import { NextResponse } from "next/server";
 import { Readable } from "stream";
 import { google } from "googleapis";
 import { createClient } from "@supabase/supabase-js";
 
-/**
- * CSV helpers
- */
+/** CSV helpers */
 const HEADERS = [
   "id",
   "idContaq",
@@ -38,6 +38,7 @@ function csvEscape(v) {
     ? `"${s.replace(/"/g, '""')}"`
     : s;
 }
+
 function rowsToCsv(rows) {
   const lines = [];
   lines.push(HEADERS.join(","));
@@ -48,9 +49,31 @@ function rowsToCsv(rows) {
   return lines.join("\n");
 }
 
-/**
- * Main GET handler
- */
+/** Paginazione: scarica TUTTO a blocchi */
+async function fetchAllAppointmentsPaged(supabase, pageSize = 1000) {
+  let from = 0;
+  const all = [];
+  for (;;) {
+    const { data, error } = await supabase
+      .from("appointments")
+      .select("*")
+      // ordine stabile per paginare
+      .order("dataInserimento", { ascending: true })
+      .order("oraInserimento", { ascending: true })
+      .order("idContaq", { ascending: true }) // se non esiste usa la tua chiave stabile
+      .range(from, from + pageSize - 1);
+
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+
+    all.push(...data);
+    if (data.length < pageSize) break; // ultima pagina
+    from += pageSize;
+  }
+  return all;
+}
+
+/** Main GET handler */
 export async function GET(req) {
   try {
     const url = new URL(req.url);
@@ -66,10 +89,7 @@ export async function GET(req) {
 
     // 1) sicurezza
     if (!CRON_SECRET || secret !== CRON_SECRET) {
-      return NextResponse.json(
-        { ok: false, error: "unauthorized" },
-        { status: 401 }
-      );
+      return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
     }
 
     // 2) check env
@@ -86,25 +106,23 @@ export async function GET(req) {
       );
     }
 
-    // 3) Supabase: estrai dati
+    // 3) Supabase: conteggio + fetch completo paginato
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    const { data, error } = await supabase
-      .from("appointments")
-      .select("*")
-      .order("dataInserimento", { ascending: true })
-      .order("oraInserimento", { ascending: true });
 
-    if (error) {
+    const { count, error: countErr } = await supabase
+      .from("appointments")
+      .select("*", { count: "exact", head: true });
+    if (countErr) {
       return NextResponse.json(
-        { ok: false, error: `Supabase error: ${error.message}` },
+        { ok: false, error: `Supabase count error: ${countErr.message}` },
         { status: 500 }
       );
     }
 
-    const rows = data || [];
-    const csv = rowsToCsv(rows);
+    const allRows = await fetchAllAppointmentsPaged(supabase, 1000);
+    const csv = rowsToCsv(allRows);
 
-    // 4) Google Drive (Service Account) – Drive Condiviso
+    // 4) Google Drive (Service Account)
     const credentials = JSON.parse(GOOGLE_SERVICE_ACCOUNT_JSON);
     const jwt = new google.auth.JWT({
       email: credentials.client_email,
@@ -113,14 +131,14 @@ export async function GET(req) {
     });
     const drive = google.drive({ version: "v3", auth: jwt });
 
-    const folderId = GOOGLE_DRIVE_FOLDER_ID; // deve essere in un Drive Condiviso
+    const folderId = GOOGLE_DRIVE_FOLDER_ID;
     const today = new Date();
     const yyyy = String(today.getFullYear());
     const mm = String(today.getMonth() + 1).padStart(2, "0");
     const dd = String(today.getDate()).padStart(2, "0");
     const filename = `coface_backup_${yyyy}-${mm}-${dd}.csv`;
 
-    // 4a) se il file di oggi esiste già nella cartella del Drive Condiviso -> skip
+    // 4a) se esiste già, salta (ma mostra i conteggi)
     const existing = await drive.files.list({
       q: `'${folderId}' in parents and trashed = false and name = '${filename}'`,
       fields: "files(id,name)",
@@ -129,16 +147,23 @@ export async function GET(req) {
     });
 
     if (existing.data.files && existing.data.files.length > 0) {
+      console.log("backup/export (skip existing)", {
+        exported_rows: allRows.length,
+        db_count: count,
+        filename,
+      });
       return NextResponse.json({
         ok: true,
         skipped: true,
         reason: "already_exists",
         file: existing.data.files[0],
-        count: rows.length,
+        exported_rows: allRows.length,
+        db_count: count,
+        filename,
       });
     }
 
-    // 4b) upload su Drive Condiviso
+    // 4b) upload su Drive
     const media = { mimeType: "text/csv", body: Readable.from(csv) };
     const fileMetadata = { name: filename, parents: [folderId], mimeType: "text/csv" };
 
@@ -149,15 +174,21 @@ export async function GET(req) {
       supportsAllDrives: true,
     });
 
+    console.log("backup/export (uploaded)", {
+      exported_rows: allRows.length,
+      db_count: count,
+      filename,
+      uploaded_id: upload.data.id,
+    });
+
     return NextResponse.json({
       ok: true,
       uploaded: upload.data,
-      count: rows.length,
+      exported_rows: allRows.length,
+      db_count: count,
+      filename,
     });
   } catch (e) {
-    return NextResponse.json(
-      { ok: false, error: String(e?.message || e) },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: String(e && e.message ? e.message : e) }, { status: 500 });
   }
 }
