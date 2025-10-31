@@ -2023,17 +2023,37 @@ function OperatorLeaderboardCard({ rows, target = 15 }) {
   );
 }
 
-function CancellationStatsCard({ stats, annMonth, setAnnMonth, annYear, setAnnYear, detailRows }) {
+function CancellationStatsCard({
+  stats,
+  byClient,
+  annMonth: annMonthProp,
+  setAnnMonth: setAnnMonthProp,
+  annYear: annYearProp,
+  setAnnYear: setAnnYearProp,
+  detailRows,
+}) {
+  // Stato di fallback: se il padre non passa i valori, usiamo questi
+  const [annMonthState, setAnnMonthState] = useState(new Date().getMonth() + 1);
+  const [annYearState, setAnnYearState] = useState(new Date().getFullYear());
+
+  // Usa i valori del padre se presenti, altrimenti quelli interni
+  const annMonth = annMonthProp ?? annMonthState;
+  const annYear = annYearProp ?? annYearState;
+  const setAnnMonth = setAnnMonthProp ?? setAnnMonthState;
+  const setAnnYear = setAnnYearProp ?? setAnnYearState;
+
+  // Selettori mese/anno
   const months = [
-    { v:1,  l:"Gen" }, { v:2,  l:"Feb" }, { v:3,  l:"Mar" }, { v:4,  l:"Apr" },
-    { v:5,  l:"Mag" }, { v:6,  l:"Giu" }, { v:7,  l:"Lug" }, { v:8,  l:"Ago" },
-    { v:9,  l:"Set" }, { v:10, l:"Ott" }, { v:11, l:"Nov" }, { v:12, l:"Dic" },
+    { v: 1, l: "Gen" }, { v: 2, l: "Feb" }, { v: 3, l: "Mar" }, { v: 4, l: "Apr" },
+    { v: 5, l: "Mag" }, { v: 6, l: "Giu" }, { v: 7, l: "Lug" }, { v: 8, l: "Ago" },
+    { v: 9, l: "Set" }, { v: 10, l: "Ott" }, { v: 11, l: "Nov" }, { v: 12, l: "Dic" },
   ];
   const years = (() => {
     const y0 = new Date().getFullYear() - 3;
     return Array.from({ length: 7 }, (_, i) => y0 + i);
   })();
 
+  // Utility formattazione date per export
   function fmtDate(d) {
     if (!d) return "";
     const dd = d instanceof Date ? d : new Date(d);
@@ -2044,84 +2064,133 @@ function CancellationStatsCard({ stats, annMonth, setAnnMonth, annYear, setAnnYe
     return `${y}-${m}-${day}`;
   }
 
-  function exportExcel() {
-    // Foglio 1: RIEPILOGO
-    const summaryAOA = [
-      ["Operatore","Inseriti mese","Annullati mese","% annulli mese"]
-    ];
-    for (const r of stats) {
-      summaryAOA.push([
-        r.operatore,
-        r.inseritiMese,
-        r.annullatiMese,
-        r.percAnnulli == null ? "" : (r.percAnnulli * 100).toFixed(1) + "%"
+function exportExcel() {
+  // ---- Foglio 1: RIEPILOGO per OPERATORE
+  const summaryAOA = [["Operatore","Inseriti mese","Annullati mese","% annulli mese"]];
+  for (const r of stats) {
+    summaryAOA.push([
+      r.operatore,
+      r.inseritiMese,
+      r.annullatiMese,
+      r.percAnnulli == null ? "" : (r.percAnnulli * 100).toFixed(1) + "%"
+    ]);
+  }
+  const wb = XLSX.utils.book_new();
+  const ws1 = XLSX.utils.aoa_to_sheet(summaryAOA);
+  XLSX.utils.book_append_sheet(wb, ws1, "Riepilogo Annulli");
+
+  // ---- Foglio 2: DETTAGLIO per OPERATORE
+  const header = [
+    "ID","Operatore","Data Inserimento","Data Appuntamento",
+    "Azienda","Luogo","Cliente","Agente","Tipo","Stato",
+    "Data Annullamento","Referente","Email","Telefono",
+    "Indirizzo","Provincia","ID Contaq","Note"
+  ];
+  const detailAOA = [header];
+  const byOp = new Map();
+  for (const r of detailRows) {
+    const op = r.operatore || "—";
+    if (!byOp.has(op)) byOp.set(op, []);
+    byOp.get(op).push(r);
+  }
+  const ops = Array.from(byOp.keys()).sort((a,b) => a.localeCompare(b, "it", { sensitivity:"base" }));
+  ops.forEach((op, idx) => {
+    if (idx > 0) detailAOA.push([]);
+    detailAOA.push([`Operatore: ${op}`]);
+    for (const r of byOp.get(op)) {
+      detailAOA.push([
+        r.id ?? "", r.operatore ?? "", fmtDate(r.dataInserimento), fmtDate(r.dataAppuntamento),
+        r.azienda ?? "", r.città || r.luogo || "", r.cliente ?? "", r.agente ?? "", r.tipo ?? "",
+        r.stato ?? "", fmtDate(r.dataAnnullamento), r.referente ?? "", r.email ?? "", r.telefono ?? "",
+        r.indirizzo ?? "", r.provincia ?? "", r.idContaq ?? "", r.note ?? ""
       ]);
     }
-    const wb = XLSX.utils.book_new();
-    const ws1 = XLSX.utils.aoa_to_sheet(summaryAOA);
-    XLSX.utils.book_append_sheet(wb, ws1, "Riepilogo Annulli");
+  });
+  const ws2 = XLSX.utils.aoa_to_sheet(detailAOA);
+  XLSX.utils.book_append_sheet(wb, ws2, "Dettaglio Appuntamenti");
 
-    // Foglio 2: DETTAGLIO, raggruppato per Operatore (righe vuote come separatori)
-    const header = [
-      "ID","Operatore","Data Inserimento","Data Appuntamento",
-      "Azienda","Luogo","Cliente","Agente","Tipo","Stato",
-      "Data Annullamento","Referente","Email","Telefono","Indirizzo","Provincia","ID Contaq","Note"
-    ];
-    const detailAOA = [header];
+  // ---- Foglio 3: TOTALE PER CLIENTE
+  const byClientAOA = [["Cliente","Inseriti mese","Annullati mese","Buoni mese"]];
+  for (const r of byClient) {
+    byClientAOA.push([r.cliente, r.inseritiMese, r.annullatiMese, r.buoniMese]);
+  }
+  const ws3 = XLSX.utils.aoa_to_sheet(byClientAOA);
+  XLSX.utils.book_append_sheet(wb, ws3, "Totale per cliente");
 
-    // Raggruppo per operatore
-    const byOp = new Map();
-    for (const r of detailRows) {
-      const op = r.operatore || "—";
-      if (!byOp.has(op)) byOp.set(op, []);
-      byOp.get(op).push(r);
-    }
+  // ---- Foglio 4: DETTAGLIO per CLIENTE (Inseriti/Annullati del mese)
+  const ymOf = (d) => {
+    if (!d) return "";
+    const dd = d instanceof Date ? d : new Date(d);
+    if (Number.isNaN(dd.getTime())) return "";
+    return `${dd.getFullYear()}-${String(dd.getMonth()+1).padStart(2,"0")}`;
+  };
+  const ym = `${annYear}-${String(annMonth).padStart(2,"0")}`;
+  const tagNelMese = (r) => {
+    const isIns = ymOf(r.dataInserimento) === ym;
+    const isAnn = (r.stato || "").toLowerCase() === "annullato" && ymOf(r.dataAnnullamento) === ym;
+    if (isAnn) return "Annullato";
+    if (isIns) return "Inserito";
+    return ""; // in teoria non dovrebbe capitare, ma teniamolo safe
+  };
 
-    const ops = Array.from(byOp.keys()).sort((a,b) => a.localeCompare(b, "it", { sensitivity: "base" }));
-    ops.forEach((op, idx) => {
-      if (idx > 0) detailAOA.push([]);            // riga vuota separatore
-      detailAOA.push([`Operatore: ${op}`]);       // intestazione gruppo
-
-      for (const r of byOp.get(op)) {
-        detailAOA.push([
-          r.id ?? "",
-          r.operatore ?? "",
-          fmtDate(r.dataInserimento),
-          fmtDate(r.dataAppuntamento),
-          r.azienda ?? "",
-          r.città || r.luogo || "",               // adattati ai tuoi naming
-          r.cliente ?? "",
-          r.agente ?? "",
-          r.tipo ?? "",
-          r.stato ?? "",
-          fmtDate(r.dataAnnullamento),
-          r.referente ?? "",
-          r.email ?? "",
-          r.telefono ?? "",
-          r.indirizzo ?? "",
-          r.provincia ?? "",
-          r.idContaq ?? "",
-          r.note ?? ""
-        ]);
-      }
-    });
-
-    const ws2 = XLSX.utils.aoa_to_sheet(detailAOA);
-    XLSX.utils.book_append_sheet(wb, ws2, "Dettaglio Appuntamenti");
-
-    const fname = `annulli_${annYear}-${String(annMonth).padStart(2,"0")}.xlsx`;
-    XLSX.writeFile(wb, fname);
+  const byCli = new Map();
+  for (const r of detailRows) {
+    const cli = r.cliente || "—";
+    if (!byCli.has(cli)) byCli.set(cli, []);
+    byCli.get(cli).push(r);
   }
 
+  const detailByClientAOA = [[
+    "Nel mese","ID","Cliente","Operatore","Data Inserimento","Data Appuntamento",
+    "Azienda","Luogo","Agente","Tipo","Stato","Data Annullamento",
+    "Referente","Email","Telefono","Indirizzo","Provincia","ID Contaq","Note"
+  ]];
+
+  const clients = Array.from(byCli.keys()).sort((a,b) => a.localeCompare(b, "it", { sensitivity:"base" }));
+  clients.forEach((cli, idx) => {
+    if (idx > 0) detailByClientAOA.push([]);
+    detailByClientAOA.push([`Cliente: ${cli}`]);
+    for (const r of byCli.get(cli)) {
+      detailByClientAOA.push([
+        tagNelMese(r),
+        r.id ?? "",
+        r.cliente ?? "",
+        r.operatore ?? "",
+        fmtDate(r.dataInserimento),
+        fmtDate(r.dataAppuntamento),
+        r.azienda ?? "",
+        r.città || r.luogo || "",
+        r.agente ?? "",
+        r.tipo ?? "",
+        r.stato ?? "",
+        fmtDate(r.dataAnnullamento),
+        r.referente ?? "",
+        r.email ?? "",
+        r.telefono ?? "",
+        r.indirizzo ?? "",
+        r.provincia ?? "",
+        r.idContaq ?? "",
+        r.note ?? "",
+      ]);
+    }
+  });
+  const ws4 = XLSX.utils.aoa_to_sheet(detailByClientAOA);
+  XLSX.utils.book_append_sheet(wb, ws4, "Dettaglio per cliente");
+
+  const fname = `annulli_${annYear}-${String(annMonth).padStart(2,"0")}.xlsx`;
+  XLSX.writeFile(wb, fname);
+}
+
+  // ------------------- RENDER -------------------
   return (
     <Card>
       <div className="flex items-center gap-2">
-        <Select value={String(annMonth)} onValueChange={(v)=>setAnnMonth(Number(v))}>
+        <Select value={String(annMonth)} onValueChange={(v) => setAnnMonth(Number(v))}>
           <SelectTrigger className="w-[110px]">
             <SelectValue placeholder="Mese" />
           </SelectTrigger>
           <SelectContent>
-            {months.map(m => (
+            {months.map((m) => (
               <SelectItem key={m.v} value={String(m.v)}>
                 {m.l}
               </SelectItem>
@@ -2129,12 +2198,12 @@ function CancellationStatsCard({ stats, annMonth, setAnnMonth, annYear, setAnnYe
           </SelectContent>
         </Select>
 
-        <Select value={String(annYear)} onValueChange={(v)=>setAnnYear(Number(v))}>
+        <Select value={String(annYear)} onValueChange={(v) => setAnnYear(Number(v))}>
           <SelectTrigger className="w-[110px]">
             <SelectValue placeholder="Anno" />
           </SelectTrigger>
           <SelectContent>
-            {years.map(y => (
+            {years.map((y) => (
               <SelectItem key={y} value={String(y)}>
                 {y}
               </SelectItem>
@@ -2143,12 +2212,12 @@ function CancellationStatsCard({ stats, annMonth, setAnnMonth, annYear, setAnnYe
         </Select>
 
         <Button variant="outline" onClick={exportExcel}>
-          Export Excel (2 fogli)
+          Export Excel (4 fogli)
         </Button>
       </div>
 
-
       <div className="px-4 pb-4">
+        {/* Tabella per Operatore */}
         <div className="overflow-auto">
           <table className="min-w-full text-sm">
             <thead>
@@ -2182,14 +2251,51 @@ function CancellationStatsCard({ stats, annMonth, setAnnMonth, annYear, setAnnYe
             </tbody>
           </table>
         </div>
+
+        {/* Tabella per Cliente */}
+        <div className="mt-6">
+          <div className="text-sm font-medium mb-2">Totali per cliente (mese selezionato)</div>
+          <div className="overflow-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="text-left border-b">
+                  <th className="py-2 pr-3">Cliente</th>
+                  <th className="py-2 pr-3">Inseriti mese</th>
+                  <th className="py-2 pr-3">Annullati mese</th>
+                  <th className="py-2 pr-3">Buoni mese</th>
+                </tr>
+              </thead>
+              <tbody>
+                {byClient.map((r) => (
+                  <tr key={r.cliente} className="border-b last:border-0">
+                    <td className="py-2 pr-3">{r.cliente}</td>
+                    <td className="py-2 pr-3">{r.inseritiMese}</td>
+                    <td className="py-2 pr-3">{r.annullatiMese}</td>
+                    <td className="py-2 pr-3">{r.buoniMese}</td>
+                  </tr>
+                ))}
+                {byClient.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="py-4 text-center text-muted-foreground">
+                      Nessun dato per il mese selezionato
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <p className="text-xs text-muted-foreground mt-2">
           La metrica è: annullati con <em>data annullamento</em> nel mese / inseriti con <em>data inserimento</em> nel mese.
+          <br />
           Il dettaglio include tutti gli appuntamenti inseriti-nel-mese o annullati-nel-mese, raggruppati per operatore.
         </p>
       </div>
     </Card>
   );
 }
+
 
 function TodayByClientCard({ data }) {
   const { rows, totals } = data;
@@ -2527,6 +2633,58 @@ const cancellationStats = useMemo(() => {
   }
 
   out.sort((a, b) => (b.percAnnulli ?? -1) - (a.percAnnulli ?? -1));
+  return out;
+}, [rows, agent, creator, client, q, annMonth, annYear]);
+
+const cancellationByClient = useMemo(() => {
+  function ymOf(d) {
+    if (!d) return null;
+    const dt = d instanceof Date ? d : new Date(d);
+    if (Number.isNaN(dt.getTime())) return null;
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`;
+  }
+  const ym = `${annYear}-${String(annMonth).padStart(2, "0")}`;
+
+  // stessa base dei filtri già usata per cancellationStats
+  let base = rows;
+  if (agent !== "tutti")   base = base.filter(r => r.agente === agent);
+  if (creator !== "tutti") base = base.filter(r => (r.operatore || "").toLowerCase() === creator);
+  if (client !== "tutti")  base = base.filter(r => r.cliente === client);
+  if (q?.trim()) {
+    const n = q.trim().toLowerCase();
+    base = base.filter((r) =>
+      [
+        r.azienda, r.referente, r.email, r.telefono, r.piva, r.città, r.indirizzo,
+        r.provincia, r.agente, r.operatore, r.cliente, r.idContaq, r.note,
+      ]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(n))
+    );
+  }
+
+  const insMap = new Map(); // inseriti nel mese
+  const annMap = new Map(); // annullati con data annullamento nel mese
+
+  for (const r of base) {
+    const cli = r.cliente || "—";
+    if (ymOf(r.dataInserimento) === ym) {
+      insMap.set(cli, (insMap.get(cli) || 0) + 1);
+    }
+    if ((r.stato || "").toLowerCase() === "annullato" && ymOf(r.dataAnnullamento) === ym) {
+      annMap.set(cli, (annMap.get(cli) || 0) + 1);
+    }
+  }
+
+  const clients = new Set([...insMap.keys(), ...annMap.keys()]);
+  const out = [];
+  for (const cli of clients) {
+    const inseritiMese  = insMap.get(cli) || 0;
+    const annullatiMese = annMap.get(cli) || 0;
+    const buoniMese     = Math.max(0, inseritiMese - annullatiMese);
+    out.push({ cliente: cli, inseritiMese, annullatiMese, buoniMese });
+  }
+
+  out.sort((a, b) => (b.buoniMese - a.buoniMese) || a.cliente.localeCompare(b.cliente, "it", { sensitivity: "base" }));
   return out;
 }, [rows, agent, creator, client, q, annMonth, annYear]);
 
@@ -3232,6 +3390,7 @@ function markRecupero(r) {
       >
         <CancellationStatsCard
           stats={cancellationStats}
+          byClient={cancellationByClient}
           annMonth={annMonth}
           setAnnMonth={setAnnMonth}
           annYear={annYear}

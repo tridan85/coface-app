@@ -244,7 +244,7 @@ export default function CreateAppointmentModal({
                   <SelectValue placeholder="Seleziona tipo appuntamento" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="in_sede">In sede</SelectItem>
+                  <SelectItem value="sede">In sede</SelectItem>
                   <SelectItem value="videocall">Videocall</SelectItem>
                 </SelectContent>
               </Select>
