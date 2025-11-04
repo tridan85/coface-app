@@ -490,6 +490,55 @@ function openEmail({ to, cc, bcc, subject, body }) {
   a.remove();
 }
 
+// ---- TCI CAPACITY: costanti + helper ----
+export const TCI_CLIENTI = [
+  "TCI PADOVA",
+  "TCI BRESCIA 2",
+  "TCI MILANO 4",
+  "TCI MACERATA",
+  "TCI CATANIA",
+];
+
+// normalizza stringhe per confronti robusti
+function norm(s) {
+  return String(s || "").trim().toUpperCase();
+}
+
+// true se il cliente è uno dei TCI
+export function isTciCliente(cli) {
+  const n = norm(cli);
+  return TCI_CLIENTI.some((x) => norm(x) === n);
+}
+
+// chiave settimana ISO: YYYY-Www (sett. che inizia il lunedì)
+export function weekKeyFromDate(d) {
+  const dt = d instanceof Date ? d : new Date(d);
+  if (Number.isNaN(dt.getTime())) return null;
+
+  // calcolo ISO week
+  const tmp = new Date(Date.UTC(dt.getFullYear(), dt.getMonth(), dt.getDate()));
+  const day = tmp.getUTCDay() || 7; // 1..7 (lun=1)
+  tmp.setUTCDate(tmp.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(tmp.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil(((tmp - yearStart) / 86400000 + 1) / 7);
+  const y = tmp.getUTCFullYear();
+  return `${y}-W${String(weekNo).padStart(2, "0")}`;
+}
+
+// testo human-readable dell’intervallo (lun-dom) di una weekKey
+export function weekRangeLabel(weekKey) {
+  if (!weekKey) return "";
+  const [y, w] = weekKey.split("-W").map((x) => Number(x));
+  // trova il lunedì di quella iso-week
+  const simple = new Date(Date.UTC(y, 0, 1 + (w - 1) * 7));
+  const day = simple.getUTCDay() || 7;
+  const monday = new Date(simple);
+  monday.setUTCDate(simple.getUTCDate() - day + 1);
+  const sunday = new Date(monday);
+  sunday.setUTCDate(monday.getUTCDate() + 6);
+  const fmt = (D) => `${D.getUTCDate()}/${String(D.getUTCMonth() + 1).padStart(2, "0")}`;
+  return `${fmt(monday)} – ${fmt(sunday)}`;
+}
 
 /* ────────────────────────────────────────────────────────────── */
 /* Helper tipo appuntamento + lookup email agente                 */
@@ -615,6 +664,7 @@ function makeEmailAgente(r) {
   let cc = [
     "arturo.antacido@coface.com",
     "cofaceappuntamenti@apemo.net",
+    "tlcoface@contaq.it",
   ];
   let bcc = ["tlcoface@contaq.it"];
 
@@ -2296,72 +2346,221 @@ function exportExcel() {
   );
 }
 
+    function TodayByClientCard({ data }) {
+        const { rows, totals } = data;
 
-function TodayByClientCard({ data }) {
-  const { rows, totals } = data;
+        return (
+            <Card>
+                <div className="p-4 flex items-center justify-between">
+                    <div className="font-semibold text-lg">Oggi per cliente</div>
+                    <div className="text-sm text-muted-foreground">
+                        Totale oggi: <span className="font-medium">{totals.totale}</span>
+                    </div>
+                </div>
+
+                <div className="px-4 pb-4">
+                    <div className="overflow-auto">
+                        <table className="min-w-full text-sm">
+                            <thead>
+                                <tr className="text-left border-b">
+                                    <th className="py-2 pr-3">Cliente</th>
+                                    <th className="py-2 pr-3">Programm.</th>
+                                    <th className="py-2 pr-3">Svolti</th>
+                                    <th className="py-2 pr-3">Annullati</th>
+                                    <th className="py-2 pr-3">Recuperati</th>
+                                    <th className="py-2 pr-3">Totale</th>
+                                </tr>
+                            </thead>
+
+                            <tbody>
+                                {rows.map(r => (
+                                    <tr key={r.cliente} className="border-b last:border-0">
+                                        <td className="py-2 pr-3">{r.cliente}</td>
+                                        <td className="py-2 pr-3">{r.programmati}</td>
+                                        <td className="py-2 pr-3">{r.svolti}</td>
+                                        <td className="py-2 pr-3">{r.annullati}</td>
+                                        <td className="py-2 pr-3">{r.recuperati}</td>
+                                        <td className="py-2 pr-3 font-medium">{r.totale}</td>
+                                    </tr>
+                                ))}
+
+                                {rows.length === 0 && (
+                                    <tr>
+                                        <td colSpan={6} className="py-4 text-center text-muted-foreground">
+                                            Nessun appuntamento per oggi
+                                        </td>
+                                    </tr>
+                                )}
+                            </tbody>
+
+                            {rows.length > 0 && (
+                                <tfoot>
+                                    <tr className="border-t">
+                                        <td className="py-2 pr-3 font-medium">Totale</td>
+                                        <td className="py-2 pr-3">{totals.programmati}</td>
+                                        <td className="py-2 pr-3">{totals.svolti}</td>
+                                        <td className="py-2 pr-3">{totals.annullati}</td>
+                                        <td className="py-2 pr-3">{totals.recuperati}</td>
+                                        <td className="py-2 pr-3 font-semibold">{totals.totale}</td>
+                                    </tr>
+                                </tfoot>
+                            )}
+                        </table>
+                    </div>
+
+                    <p className="text-xs text-muted-foreground mt-2">
+                        Suddivisione per <em>cliente</em> degli appuntamenti con <em>data appuntamento</em> uguale ad oggi,
+                        rispettando i filtri di contesto.
+                    </p>
+                </div>
+            </Card>
+        );
+    }
+
+
+function TciWeeklyCapacityCard({ rows, target = 4 }) {
+  const tciWeekly = useMemo(() => {
+    const base = rows ?? [];
+    // cliente -> (mondayKey -> { count, label })
+    const map = new Map();
+
+    const norm = (s) => String(s || "").trim().toUpperCase();
+    const mesi = [
+      "gennaio","febbraio","marzo","aprile","maggio","giugno",
+      "luglio","agosto","settembre","ottobre","novembre","dicembre"
+    ];
+
+    // Ritorna { key: 'YYYY-MM-DD' del lunedì, label: '3–7 novembre' }
+    function weekInfoFromDate(d) {
+      const dt = d instanceof Date ? d : new Date(d);
+      if (Number.isNaN(dt.getTime())) return null;
+
+      const day = dt.getDay() || 7;           // domenica=7
+      const monday = new Date(dt);
+      monday.setHours(0, 0, 0, 0);
+      monday.setDate(dt.getDate() - (day - 1));
+
+      const friday = new Date(monday);
+      friday.setDate(monday.getDate() + 4);
+
+      const key = monday.toISOString().slice(0, 10); // YYYY-MM-DD
+      const label = `${monday.getDate()}–${friday.getDate()} ${mesi[friday.getMonth()]}`;
+      return { key, label };
+    }
+
+    const TCI_CLIENTI = [
+      "TCI PADOVA",
+      "TCI BRESCIA 2",
+      "TCI MILANO 4",
+      "TCI MACERATA",
+      "TCI CATANIA",
+    ];
+
+    // Conteggio appuntamenti per settimana (da data appuntamento)
+    for (const r of base) {
+      const cli = r?.cliente || "";
+      if (!TCI_CLIENTI.includes(norm(cli))) continue;
+
+      const wk = weekInfoFromDate(r?.data);
+      if (!wk) continue;
+
+      const keyClient = TCI_CLIENTI.find((x) => norm(x) === norm(cli)) || cli;
+      if (!map.has(keyClient)) map.set(keyClient, new Map());
+
+      const inner = map.get(keyClient);
+      const prev = inner.get(wk.key) || { count: 0, label: wk.label };
+      inner.set(wk.key, { count: prev.count + 1, label: wk.label });
+    }
+
+    // ✅ Forza la presenza della settimana corrente (anche se 0) per TUTTI i TCI
+    const cur = weekInfoFromDate(new Date());
+    for (const cli of TCI_CLIENTI) {
+      if (!map.has(cli)) map.set(cli, new Map());
+      const inner = map.get(cli);
+      if (!inner.has(cur.key)) inner.set(cur.key, { count: 0, label: cur.label });
+    }
+
+    return map; // Map<string, Map<string, {count, label}>>
+  }, [rows]);
+
+  // Preparo righe UI ordinate per cliente + settimana (cronologica)
+  const rowsUi = [];
+  for (const [client, weeks] of tciWeekly.entries()) {
+    const ordered = Array.from(weeks.entries()).sort((a, b) => a[0].localeCompare(b[0])); // sort su mondayKey
+    for (const [, v] of ordered) {
+      const count = v.count;
+      const label = v.label;
+      let cls = "text-amber-600";          // sotto target
+      if (count === target) cls = "text-green-600";
+      if (count > target) cls = "text-red-600 font-medium";
+      rowsUi.push({ client, label, count, cls });
+    }
+  }
 
   return (
     <Card>
-      <div className="p-4 flex items-center justify-between">
-        <div className="font-semibold text-lg">Oggi per cliente</div>
-        <div className="text-sm text-muted-foreground">
-          Totale oggi: <span className="font-medium">{totals.totale}</span>
+      <div className="p-4">
+        <div className="font-semibold mb-2">Capacità settimanale TCI</div>
+        <div className="text-sm text-muted-foreground mb-3">
+          Target massimo per settimana: <span className="font-medium">{target}</span>
         </div>
-      </div>
 
-      <div className="px-4 pb-4">
         <div className="overflow-auto">
           <table className="min-w-full text-sm">
             <thead>
               <tr className="text-left border-b">
                 <th className="py-2 pr-3">Cliente</th>
-                <th className="py-2 pr-3">Programm.</th>
-                <th className="py-2 pr-3">Svolti</th>
-                <th className="py-2 pr-3">Annullati</th>
-                <th className="py-2 pr-3">Recuperati</th>
-                <th className="py-2 pr-3">Totale</th>
+                <th className="py-2 pr-3">Settimana</th>
+                <th className="py-2 pr-3">Appuntamenti</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map(r => (
-                <tr key={r.cliente} className="border-b last:border-0">
-                  <td className="py-2 pr-3">{r.cliente}</td>
-                  <td className="py-2 pr-3">{r.programmati}</td>
-                  <td className="py-2 pr-3">{r.svolti}</td>
-                  <td className="py-2 pr-3">{r.annullati}</td>
-                  <td className="py-2 pr-3">{r.recuperati}</td>
-                  <td className="py-2 pr-3 font-medium">{r.totale}</td>
-                </tr>
-              ))}
-              {rows.length === 0 && (
+              {rowsUi.map((r, i) => {
+                const prevClient = i > 0 ? rowsUi[i - 1].client : null;
+                const newGroup = r.client !== prevClient; // nuovo cliente ⇒ divisorio
+
+                return (
+                  <React.Fragment key={`${r.client}-${r.label}`}>
+                    {newGroup && (
+                      <tr className="bg-gray-100">
+                        <td colSpan={3} className="py-1 pl-2 font-semibold text-gray-700 border-t">
+                          {r.client}
+                        </td>
+                      </tr>
+                    )}
+
+                    <tr className="border-b last:border-0">
+                      {/* colonna cliente vuota nelle righe di dettaglio */}
+                      <td className="py-2 pr-3"></td>
+                      <td className="py-2 pr-3">{r.label}</td>
+                      <td className={`py-2 pr-3 ${r.cls}`}>{r.count}</td>
+                    </tr>
+                  </React.Fragment>
+                );
+              })}
+
+              {rowsUi.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-4 text-center text-muted-foreground">
-                    Nessun appuntamento per oggi
+                  <td colSpan={3} className="py-4 text-center text-muted-foreground">
+                    Nessun appuntamento TCI nel periodo visibile.
                   </td>
                 </tr>
               )}
             </tbody>
-            {rows.length > 0 && (
-              <tfoot>
-                <tr className="border-t">
-                  <td className="py-2 pr-3 font-medium">Totale</td>
-                  <td className="py-2 pr-3">{totals.programmati}</td>
-                  <td className="py-2 pr-3">{totals.svolti}</td>
-                  <td className="py-2 pr-3">{totals.annullati}</td>
-                  <td className="py-2 pr-3">{totals.recuperati}</td>
-                  <td className="py-2 pr-3 font-semibold">{totals.totale}</td>
-                </tr>
-              </tfoot>
-            )}
           </table>
         </div>
+
         <p className="text-xs text-muted-foreground mt-2">
-          Suddivisione per <em>cliente</em> degli appuntamenti con <em>data appuntamento</em> uguale ad oggi, rispettando i filtri di contesto.
+          Conteggio per <em>data appuntamento</em>, raggruppato per settimana (lun–ven).{" "}
+          Colori: <span className="text-amber-600">giallo</span> &lt; target,{" "}
+          <span className="text-green-600">verde</span> = target,{" "}
+          <span className="text-red-600">rosso</span> &gt; target.
         </p>
       </div>
     </Card>
   );
 }
+
 
 
 /* ────────────────────────────────────────────────────────────── */
@@ -3374,55 +3573,62 @@ function markRecupero(r) {
       </Collapsible>
 
 
-      {/* Leaderboard Operatori – collassabile, Mese/Anno, % annullati */}
-      <Collapsible
-        title="🏆 Classifica Operatori"
-        storageKey="coface:collapse:leaderboard-v3"  // nuovo nome
-        defaultOpen={false}                          // chiusa di default
-      >
-        <OperatorLeaderboardProCard rows={rows} monthTarget={15} />
-      </Collapsible>
+  {/* Leaderboard Operatori – collassabile, Mese/Anno, % annullati */}
+  <Collapsible
+    title="🏆 Classifica Operatori"
+    storageKey="coface:collapse:leaderboard-v3"  // nuovo nome
+    defaultOpen={false}                          // chiusa di default
+  >
+    <OperatorLeaderboardProCard rows={rows} monthTarget={15} />
+  </Collapsible>
 
-      <Collapsible
-        title="📉 Annulli (mese vs inseriti)"
-        storageKey="coface:collapse:ann-stats"
-        defaultOpen={false}
-      >
-        <CancellationStatsCard
-          stats={cancellationStats}
-          byClient={cancellationByClient}
-          annMonth={annMonth}
-          setAnnMonth={setAnnMonth}
-          annYear={annYear}
-          setAnnYear={setAnnYear}
-          detailRows={cancellationDetailRows}
-        />
-      </Collapsible>
+  <Collapsible
+    title="📉 Annulli (mese vs inseriti)"
+    storageKey="coface:collapse:ann-stats"
+    defaultOpen={false}
+  >
+    <CancellationStatsCard
+      stats={cancellationStats}
+      byClient={cancellationByClient}
+      annMonth={annMonth}
+      setAnnMonth={setAnnMonth}
+      annYear={annYear}
+      setAnnYear={setAnnYear}
+      detailRows={cancellationDetailRows}
+    />
+  </Collapsible>
 
-
-      {/* ✅ Nuova card: statistiche per giorno di inserimento */}
-      <Collapsible
-        title="Statistiche per giorno di inserimento (ultimi 30 giorni presenti)"
-        storageKey="coface:collapse:ins-stats"
-        defaultOpen={false}
-      >
-        <InsertionStatsCard rows={rows} />
-      </Collapsible>
-
+  {/* 📊 Nuova card: capacità settimanale TCI */}
+<Collapsible
+  title="📊 Capacità settimanale TCI"
+  storageKey="coface:collapse:tci-capacity"
+  defaultOpen={false}
+>
+  <TciWeeklyCapacityCard rows={rows} target={4} />
+</Collapsible>
 
 
-      {/* STATISTICHE PER OPERATORE */}
-      <Collapsible
-        title="Statistiche per Operatore"
-        storageKey="coface:collapse:op-stats"
-        defaultOpen={false}
-      >
-        <OperatorStatsCard
-          rowsAll={rows}
-          rowsFiltered={filtered}
-          creators={creators}
-        />
-      </Collapsible>
+  {/* ✅ Nuova card: statistiche per giorno di inserimento */}
+  <Collapsible
+    title="Statistiche per giorno di inserimento (ultimi 30 giorni presenti)"
+    storageKey="coface:collapse:ins-stats"
+    defaultOpen={false}
+  >
+    <InsertionStatsCard rows={rows} />
+  </Collapsible>
+
+  {/* STATISTICHE PER OPERATORE */}
+  <Collapsible
+    title="Statistiche per Operatore"
+    storageKey="coface:collapse:op-stats"
+    defaultOpen={false}
+  >
+    <OperatorStatsCard
+      rowsAll={rows}
+      rowsFiltered={filtered}
+      creators={creators}
+    />
+  </Collapsible>
 
 
       {/* TABELLA */}
