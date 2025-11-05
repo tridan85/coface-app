@@ -65,6 +65,11 @@ function endPlus1h(dt) {
   return out;
 }
 
+// HH:mm (MOSTRA ORARIO)
+function hhmm(date) {
+  return format(date, "HH:mm", { locale: it });
+}
+
 // Colore deterministico per agente
 function colorForAgent(name = "") {
   const palette = [
@@ -160,10 +165,13 @@ export default function CalendarioPage() {
             const endDt = endPlus1h(startDt);
             if (!startDt || !endDt) return null;
 
-            const title =
+            // ======== SOLO QUESTA PARTE CAMBIA: TITOLO CON ORARIO ========
+            const coreTitle =
               r?.azienda && r?.agente
                 ? `${r.azienda} — ${r.agente}`
                 : r?.azienda || r?.agente || "Appuntamento";
+            const title = `${hhmm(startDt)} · ${coreTitle}`;
+            // =============================================================
 
             const col = colorForAgent(r?.agente);
 
@@ -293,6 +301,12 @@ export default function CalendarioPage() {
           timeslots={2}   // 2*30 = 1h per riga
           popup
           eventPropGetter={eventPropGetter}
+          /* ======= SOLO QUESTA PROP AGGIUNTA: FORMATI ORARI ======= */
+          formats={{
+            eventTimeRangeFormat: ({ start, end }) => `${hhmm(start)}–${hhmm(end)}`,
+            agendaTimeRangeFormat: ({ start, end }) => `${hhmm(start)}–${hhmm(end)}`,
+          }}
+          /* ======================================================= */
           messages={{
             agenda: "Agenda",
             day: "Giorno",
