@@ -32,6 +32,8 @@ import {
 } from "@/components/select";
 import * as XLSX from "xlsx";
 import LogoutButton from "@/components/LogoutButton";
+import Link from "next/link";
+
 
 // Supabase client lato browser
 import { getSupabaseClient } from "@/lib/supabaseClient";
@@ -3498,6 +3500,17 @@ function markRecupero(r) {
         <h1 className="text-2xl font-bold">Coface – Gestione Appuntamenti</h1>
         <LogoutButton />
       </div>
+
+        {/* Pulsante Calendario */}
+        <div className="mt-3">
+          <Link
+            href="/calendario"
+            className="inline-flex items-center gap-2 rounded-md bg-sky-600 px-3 py-1.5 text-white hover:bg-sky-700 shadow-sm"
+          >
+            📅 Apri Calendario
+          </Link>
+        </div>
+
 
       {/* RIGA 1 – CERCA & FILTRI */}
       <Card>
