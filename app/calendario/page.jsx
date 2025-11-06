@@ -42,7 +42,6 @@ function toISO(d) {
   return `${y}-${m}-${day}`;
 }
 
-// "2025-11-05" + "14:30" -> Date
 function buildDate(dateISO, hhmm) {
   const d = dateISO instanceof Date ? dateISO : new Date(dateISO);
   if (Number.isNaN(d.getTime())) return null;
@@ -65,12 +64,10 @@ function endPlus1h(dt) {
   return out;
 }
 
-// HH:mm (MOSTRA ORARIO)
 function hhmm(date) {
   return format(date, "HH:mm", { locale: it });
 }
 
-// Colore deterministico per agente
 function colorForAgent(name = "") {
   const palette = [
     "#60a5fa", // blue-400
@@ -101,7 +98,7 @@ export default function CalendarioPage() {
   const [agent, setAgent] = useState("tutti");
   const [agents, setAgents] = useState([]);
 
-  // Calcola l'intervallo visibile in base a view/date
+  /* ---- calcolo intervallo visibile ---- */
   const currentRange = useMemo(() => {
     let start, end;
     if (view === Views.MONTH) {
@@ -114,23 +111,43 @@ export default function CalendarioPage() {
       start = startOfDay(date);
       end = endOfDay(date);
     } else {
-      // Agenda: usiamo settimana per semplicità
+      // Agenda: settimana per semplicità
       start = startOfWeek(date, { weekStartsOn: 1 });
       end = endOfWeek(date, { weekStartsOn: 1 });
     }
     return { start, end };
   }, [date, view]);
 
-  // Carica gli eventi per intervallo + agente
+  /* ---- carico la lista completa agenti (distinct) una volta ---- */
+  useEffect(() => {
+    (async () => {
+      try {
+        // DISTINCT sugli agenti presenti nella tabella (filtriamo null/blank)
+        const { data, error } = await supabase
+          .from("appointments")
+          .select("agente", { distinct: true })
+          .not("agente", "is", null);
+        if (error) throw error;
+        const list = [...new Set((data || []).map((r) => (r.agente || "").trim()))]
+          .filter(Boolean)
+          .sort((a, b) => a.localeCompare(b, "it"));
+        setAgents(list);
+      } catch (e) {
+        // non bloccare la pagina se fallisce: la tendina resta con "Tutti"
+        console.warn("Errore caricamento agenti:", e);
+      }
+    })();
+  }, []);
+
+  /* ---- carico eventi per intervallo + agente ---- */
   const loadEvents = useCallback(
     async (start, end, currentAgent) => {
       setLoading(true);
       setErrorMsg("");
 
       const startISO = toISO(start);
-      // end esclusivo in supabase
       const endPlus = new Date(end);
-      endPlus.setDate(endPlus.getDate() + 1);
+      endPlus.setDate(endPlus.getDate() + 1); // end esclusivo
       const endISO = toISO(endPlus);
 
       try {
@@ -145,19 +162,12 @@ export default function CalendarioPage() {
           .order("ora", { ascending: true });
 
         if (currentAgent && currentAgent !== "tutti") {
-          q = q.ilike("agente", currentAgent); // case-insensitive
+          // match case-insensitive esatto (no wildcard, ma insensibile a maiuscole)
+          q = q.ilike("agente", currentAgent);
         }
 
         const { data, error } = await q;
         if (error) throw error;
-
-        // Popola la tendina agenti (prima volta)
-        if (!agents.length) {
-          const foundAgents = [...new Set((data || []).map((r) => (r.agente || "").trim()))]
-            .filter(Boolean)
-            .sort((a, b) => a.localeCompare(b, "it"));
-          setAgents(foundAgents);
-        }
 
         const mapped = (data || [])
           .map((r) => {
@@ -165,13 +175,12 @@ export default function CalendarioPage() {
             const endDt = endPlus1h(startDt);
             if (!startDt || !endDt) return null;
 
-            // ======== SOLO QUESTA PARTE CAMBIA: TITOLO CON ORARIO ========
+            // Titolo con orario in chiaro
             const coreTitle =
               r?.azienda && r?.agente
                 ? `${r.azienda} — ${r.agente}`
                 : r?.azienda || r?.agente || "Appuntamento";
             const title = `${hhmm(startDt)} · ${coreTitle}`;
-            // =============================================================
 
             const col = colorForAgent(r?.agente);
 
@@ -197,7 +206,7 @@ export default function CalendarioPage() {
         setLoading(false);
       }
     },
-    [agents.length]
+    []
   );
 
   // Ricarica quando cambiano range o agente
@@ -205,7 +214,7 @@ export default function CalendarioPage() {
     loadEvents(currentRange.start, currentRange.end, agent);
   }, [currentRange, agent, loadEvents]);
 
-  // Stile per stato
+  /* ---- stile per stato ---- */
   const eventPropGetter = useMemo(() => {
     return (event) => {
       const stato = event?.resource?.stato?.toLowerCase?.() || "";
@@ -224,7 +233,7 @@ export default function CalendarioPage() {
     };
   }, []);
 
-  // Piccola legenda con i colori degli agenti (in base agli eventi caricati)
+  /* ---- legenda colori agenti basata sugli eventi caricati ---- */
   const legendAgents = useMemo(() => {
     const names = [...new Set(events.map((e) => e?.resource?.agente).filter(Boolean))].sort(
       (a, b) => String(a).localeCompare(String(b), "it")
@@ -296,17 +305,14 @@ export default function CalendarioPage() {
           onView={setView}
           date={date}
           onNavigate={setDate}
-          // Slot/durata
-          step={30}       // 30 minuti
-          timeslots={2}   // 2*30 = 1h per riga
+          step={30}
+          timeslots={2}
           popup
           eventPropGetter={eventPropGetter}
-          /* ======= SOLO QUESTA PROP AGGIUNTA: FORMATI ORARI ======= */
           formats={{
             eventTimeRangeFormat: ({ start, end }) => `${hhmm(start)}–${hhmm(end)}`,
             agendaTimeRangeFormat: ({ start, end }) => `${hhmm(start)}–${hhmm(end)}`,
           }}
-          /* ======================================================= */
           messages={{
             agenda: "Agenda",
             day: "Giorno",
