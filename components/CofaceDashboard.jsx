@@ -61,6 +61,7 @@ const CLIENTI_CANONICI = [
   "TCI MILANO 4",
   "TCI MACERATA",
   "TCI CATANIA",
+  "Satispay",   // ✅ nuovo cliente
 ];
 
 
@@ -2577,38 +2578,61 @@ export default function CofaceAppuntamentiDashboard() {
   const canDelete = true;
 
   const editUnlockedRef = useRef(false);
+
   function ensureEditPassword() {
     if (editUnlockedRef.current) return true;
+
     const pwd = prompt("Modifica protetta.\nInserisci la password:");
     if (pwd === EDIT_PASSWORD) {
       editUnlockedRef.current = true;
       return true;
     }
+
     alert("Password errata.");
     return false;
   }
 
-  /* dati dal DB */
+  /* ============================
+     📦 Stati principali del componente
+     ============================ */
+  // Dati dal DB
   const [rows, setRows] = useState([]);
-  /* filtri / ordinamento / UI */
+
+  // Filtri / Ordinamento / UI
   const [q, setQ] = useState("");
   const [agent, setAgent] = useState("tutti");
   const [creator, setCreator] = useState("tutti");
   const [client, setClient] = useState("tutti");
   const [status, setStatus] = useState("tutti");
+
+  // Filtri data appuntamento
   const [dayAppFrom, setDayAppFrom] = useState("");
   const [dayAppTo, setDayAppTo] = useState("");
+
+  // Filtri data inserimento
   const [dayInsFrom, setDayInsFrom] = useState("");
   const [dayInsTo, setDayInsTo] = useState("");
+
+  // Ordinamento
   const [sortBy, setSortBy] = useState("inserimento");
   const [sortDir, setSortDir] = useState("asc");
+
+  // Editor e creazione
   const [editing, setEditing] = useState(null);
+  const [createOpen, setCreateOpen] = useState(false);
+
+  // Paginazione
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
-  const [createOpen, setCreateOpen] = useState(false);
+
+  // Annulli mese / anno correnti
   const now = new Date();
   const [annMonth, setAnnMonth] = useState(now.getMonth() + 1); // 1..12
-  const [annYear,  setAnnYear]  = useState(now.getFullYear());
+  const [annYear, setAnnYear] = useState(now.getFullYear());
+
+  // ✅ Prefill stabile per evitare loop con initialValues vuoto
+  const emptyDefaults = React.useMemo(() => ({}), []);
+
 
   
 
@@ -3758,12 +3782,14 @@ function markRecupero(r) {
         clientiOpzioni={clients.slice(1)}
       />
 
+      {/* Prefill stabile per evitare loop con initialValues vuoto */}
       <CreateAppointmentModal
         open={createOpen}
         setOpen={setCreateOpen}
         onCreate={handleCreate}
         clientOptions={clients.slice(1)}
         canInsert={canInsert}
+        initialValues={emptyDefaults}
       />
     </div>
   );

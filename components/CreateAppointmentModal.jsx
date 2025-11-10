@@ -1,7 +1,6 @@
-// components/CreateAppointmentModal.jsx
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/button";
 import { Input } from "@/components/input";
 import { Label } from "@/components/label";
@@ -12,13 +11,15 @@ import {
   SelectItem,
   SelectValue,
 } from "@/components/select";
-import { Calendar, Plus } from "lucide-react";
+import { Calendar, Plus } from "lucide-react"; // ✅ AGGIUNGI QUESTO
+
 
 export default function CreateAppointmentModal({
   open,
   setOpen,
   onCreate,
   clientOptions = [],
+  initialValues = {},          // resta identico
 }) {
   const [saving, setSaving] = useState(false);
   const [f, setF] = useState({
@@ -41,6 +42,23 @@ export default function CreateAppointmentModal({
     fatturato: false,
     tipo_appuntamento: "",
   });
+
+  // ✅ Prefill una sola volta per apertura per evitare loop infiniti
+  const didPrefillRef = useRef(false);
+  useEffect(() => {
+    if (open && !didPrefillRef.current) {
+      const next = { ...f, ...(initialValues || {}) };
+      const changed = Object.keys(next).some((k) => next[k] !== f[k]);
+      if (changed) setF(next);
+      didPrefillRef.current = true;
+    }
+    if (!open) {
+      // Al close, consentiamo un nuovo prefill al prossimo open
+      didPrefillRef.current = false;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]); // dipende solo da `open`
+
 
   const REQUIRED_KEYS = {
     data: "Data appuntamento",
