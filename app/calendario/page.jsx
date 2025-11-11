@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Calendar, dateFnsLocalizer, Views } from "react-big-calendar";
 import {
   parse, format,
@@ -30,15 +30,13 @@ const localizer = dateFnsLocalizer({
   locales,
 });
 
-/* ============== Helpers ============== */
+/* ============== Helpers base ============== */
 function toISO(d) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
-
-// "YYYY-MM-DD" + "HH:mm" -> Date
 function buildDate(dateISO, hhmm) {
   const d = dateISO instanceof Date ? dateISO : new Date(dateISO);
   if (Number.isNaN(d.getTime())) return null;
@@ -64,7 +62,7 @@ function colorForAgent(name = "") {
 }
 
 /* ====== Parametri disponibilità ====== */
-const SLOT_MINUTES = 60;  // durata appuntamento
+const SLOT_MINUTES = 60;   // durata appuntamento
 const BUFFER_MINUTES = 60; // distanza minima tra appuntamenti
 const WORK_START_HOUR = 9;
 const WORK_END_HOUR = 18;
@@ -83,6 +81,53 @@ const CLIENTI_CANONICI = [
   "Satispay",
 ];
 
+/* ====== Normalizzazione & Fuzzy-matching agenti ====== */
+function toTitleCase(s = "") {
+  return s
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase()
+    .replace(/\b\p{L}/gu, (m) => m.toUpperCase());
+}
+function keyCI(s = "") {
+  return s.trim().replace(/\s+/g, " ").toLowerCase();
+}
+function levenshtein(a = "", b = "") {
+  a = a.toLowerCase(); b = b.toLowerCase();
+  const dp = Array.from({ length: a.length + 1 }, (_, i) =>
+    Array(b.length + 1).fill(0)
+  );
+  for (let i = 0; i <= a.length; i++) dp[i][0] = i;
+  for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost
+      );
+    }
+  }
+  return dp[a.length][b.length];
+}
+function canonicalizeAgent(input, knownAgents, fuzzyMaxDistance = 2) {
+  const raw = (input || "").trim();
+  if (!raw) return "";
+  const k = keyCI(raw);
+  const dict = new Map((knownAgents || []).map((n) => [keyCI(n), toTitleCase(n)]));
+  if (dict.has(k)) return dict.get(k);
+
+  let best = null, bestDist = Infinity;
+  for (const [lk, canon] of dict.entries()) {
+    const dist = levenshtein(k, lk);
+    if (dist < bestDist) { bestDist = dist; best = canon; }
+  }
+  if (best && bestDist <= fuzzyMaxDistance) return best;
+
+  return toTitleCase(raw);
+}
+
 /* ============== Pagina Calendario ============== */
 export default function CalendarioPage() {
   const [events, setEvents] = useState([]);
@@ -91,10 +136,23 @@ export default function CalendarioPage() {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
 
-  const [agent, setAgent] = useState("tutti");
-  const [agents, setAgents] = useState([]); // tendina
+  // 🔒 Lista agenti globale (sempre completa)
+  const [allAgents, setAllAgents] = useState([]);
+  const allAgentsRef = useRef([]);
+  useEffect(() => { allAgentsRef.current = allAgents; }, [allAgents]);
 
-  // Modale condiviso (tuo)
+  // dropdown agente (mostriamo sempre tutti)
+  const [agent, setAgent] = useState("tutti");
+
+  // loading “gentile” per evitare lampeggio
+  const [showLoading, setShowLoading] = useState(false);
+  useEffect(() => {
+    if (!loading) { setShowLoading(false); return; }
+    const t = setTimeout(() => setShowLoading(true), 200);
+    return () => clearTimeout(t);
+  }, [loading]);
+
+  // Modale condiviso
   const [modalOpen, setModalOpen] = useState(false);
   const [modalInitial, setModalInitial] = useState({});
 
@@ -117,30 +175,50 @@ export default function CalendarioPage() {
     return { start, end };
   }, [date, view]);
 
-  /* --------- Agenti: fetch completo (no range), dedup e merge --------- */
-  useEffect(() => {
-    (async () => {
-      try {
+// Carica TUTTI gli agenti (paginando) e deduplica case-insensitive
+useEffect(() => {
+  (async () => {
+    try {
+      const PAGE = 1000;                      // dimensione pagina
+      let from = 0;
+      const seen = new Map();                 // keyCI -> Nome Canonico
+
+      // cicla finché la pagina restituisce righe
+      while (true) {
+        const to = from + PAGE - 1;
         const { data, error } = await supabase
           .from("appointments")
-          .select("agente")
+          .select("agente")                   // solo la colonna agente
           .not("agente", "is", null)
           .neq("agente", "")
           .order("agente", { ascending: true })
-          .range(0, 100000); // tetto alto
+          .range(from, to);
+
         if (error) throw error;
+        if (!data || data.length === 0) break;
 
-        const all = [...new Set((data || []).map((r) => (r.agente || "").trim()))]
-          .filter(Boolean)
-          .sort((a, b) => a.localeCompare(b, "it"));
-        setAgents(all);
-      } catch (e) {
-        setErrorMsg(`Errore agenti: ${e?.message || e}`);
+        for (const r of data) {
+          const t = toTitleCase(r.agente || "");
+          if (!t) continue;
+          const k = keyCI(t);
+          if (!seen.has(k)) seen.set(k, t);
+        }
+
+        // se l’ultima pagina è più corta di PAGE, abbiamo finito
+        if (data.length < PAGE) break;
+        from = to + 1;
       }
-    })();
-  }, []);
 
-  /* --------- Eventi per intervallo + filtro agente --------- */
+      const full = [...seen.values()].sort((a, b) => a.localeCompare(b, "it"));
+      setAllAgents(full);                     // 🔒 usata SEMPRE dalla tendina
+    } catch (e) {
+      setErrorMsg(`Errore agenti: ${e?.message || e}`);
+    }
+  })();
+}, []);
+
+
+  /* --------- Eventi per intervallo (nessun update sugli agenti!) --------- */
   const loadEvents = useCallback(async (start, end, currentAgent) => {
     setLoading(true);
     setErrorMsg("");
@@ -150,7 +228,7 @@ export default function CalendarioPage() {
     const endISO = toISO(endPlus);
 
     try {
-      let q = supabase
+      const { data, error } = await supabase
         .from("appointments")
         .select("id, data, ora, azienda, cliente, agente, operatore, stato", { count: "exact" })
         .gte("data", startISO)
@@ -158,45 +236,41 @@ export default function CalendarioPage() {
         .order("data", { ascending: true })
         .order("ora", { ascending: true });
 
-      if (currentAgent && currentAgent !== "tutti") {
-        q = q.eq("agente", currentAgent); // match esatto
-      }
-
-      const { data, error } = await q;
       if (error) throw error;
 
-      // merge agenti trovati nel range (evita “buchi”)
-      const foundAgents = [...new Set((data || []).map((r) => (r.agente || "").trim()))]
-        .filter(Boolean)
-        .sort((a, b) => a.localeCompare(b, "it"));
-      if (foundAgents.length) {
-        setAgents((prev) =>
-          [...new Set([...prev, ...foundAgents])]
-            .filter(Boolean)
-            .sort((a, b) => a.localeCompare(b, "it"))
-        );
+      // filtro agente in memoria con normalizzazione + fuzzy (usando allAgentsRef)
+      let rows = data || [];
+      if (currentAgent && currentAgent !== "tutti") {
+        const targetCanon = toTitleCase(currentAgent);
+        rows = rows.filter((r) => {
+          const canon = canonicalizeAgent(r.agente, [currentAgent, ...allAgentsRef.current]);
+          return keyCI(canon) === keyCI(targetCanon);
+        });
       }
 
-      const mapped = (data || []).map((r) => {
-        const startDt = buildDate(r?.data, r?.ora);
-        const endDt = endPlus1h(startDt);
-        if (!startDt || !endDt) return null;
+      const mapped = rows
+        .map((r) => {
+          const startDt = buildDate(r?.data, r?.ora);
+          const endDt   = endPlus1h(startDt);
+          if (!startDt || !endDt) return null;
 
-        const title = `${hhmm(startDt)} · ${[r?.azienda, r?.agente].filter(Boolean).join(" — ") || "Appuntamento"}`;
-        const col = colorForAgent(r?.agente);
+          const agentCanon = toTitleCase(r?.agente || "");
+          const col = colorForAgent(agentCanon);
+          const title = `${hhmm(startDt)} · ${[r?.azienda, agentCanon].filter(Boolean).join(" — ") || "Appuntamento"}`;
 
-        return {
-          id: String(r.id),
-          title,
-          start: startDt,
-          end: endDt,
-          allDay: false,
-          resource: r,
-          backgroundColor: col,
-          borderColor: col,
-          textColor: "#111827",
-        };
-      }).filter(Boolean);
+          return {
+            id: String(r.id),
+            title,
+            start: startDt,
+            end: endDt,
+            allDay: false,
+            resource: { ...r, agente: agentCanon },
+            backgroundColor: col,
+            borderColor: col,
+            textColor: "#111827",
+          };
+        })
+        .filter(Boolean);
 
       setEvents(mapped);
     } catch (e) {
@@ -223,19 +297,18 @@ export default function CalendarioPage() {
     };
   }, []);
 
-  // Legenda agenti
+  // Legenda agenti (da eventi correnti)
   const legendAgents = useMemo(() => {
     const names = [...new Set(events.map((e) => e?.resource?.agente).filter(Boolean))]
       .sort((a, b) => String(a).localeCompare(String(b), "it"));
     return names.map((name) => ({ name, color: colorForAgent(name) }));
   }, [events]);
 
-  /* --------- Disponibilità: slot per agente --------- */
+  /* --------- Disponibilità: slot per agente (no sabato/no domenica) --------- */
   const availableSlotsByDay = useMemo(() => {
     if (!agent || agent === "tutti") return {};
-    const agentEvents = events.filter(
-      (e) => (e?.resource?.agente || "").toLowerCase() === agent.toLowerCase()
-    );
+    const agentEvents = events.filter((e) => (e?.resource?.agente || "") === agent);
+
     const occupied = agentEvents.map((e) => ({
       start: addMinutes(e.start, -BUFFER_MINUTES),
       end: addMinutes(e.end, BUFFER_MINUTES),
@@ -251,6 +324,10 @@ export default function CalendarioPage() {
         currentRange.start.getMonth(),
         currentRange.start.getDate() + i
       );
+
+      const dow = day.getDay();
+      if (dow === 0 || dow === 6) continue; // domenica/sabato
+
       let cursor = setMinutes(setHours(day, WORK_START_HOUR), 0);
       const dayEnd = setMinutes(setHours(day, WORK_END_HOUR), 0);
 
@@ -263,65 +340,58 @@ export default function CalendarioPage() {
         }
         cursor = addMinutes(cursor, 60);
       }
-      out[toISO(day)] = slots;
+      if (slots.length) out[toISO(day)] = slots;
     }
     return out;
   }, [events, agent, currentRange]);
 
-// Generatore ID simile alla dashboard: "MH" + 10 caratteri base36 maiuscoli
-function makeAppointmentId() {
-  return (
-    "MH" +
-    Math.random().toString(36).slice(2, 12).toUpperCase()
-  );
-}
+  // Generatore ID simile alla dashboard: "MH" + 10 caratteri base36 maiuscoli
+  function makeAppointmentId() {
+    return "MH" + Math.random().toString(36).slice(2, 12).toUpperCase();
+  }
 
-/* --------- onCreate dal tuo modale: insert su Supabase --------- */
-async function handleCreateFromModal(formValues) {
-  const now = new Date();
-  const datainserimento = toISO(now);                  // es. "2025-11-19"
-  const orainserimento = hhmm(now);                    // es. "09:42"
+  /* --------- onCreate dal modale: insert su Supabase --------- */
+  async function handleCreateFromModal(formValues) {
+    const now = new Date();
+    const datainserimento = toISO(now);
+    const orainserimento = hhmm(now);
 
-  // Normalizzazioni → colonne effettive del DB
-  const payload = {
-    id: makeAppointmentId(),                           // 🔸 ID obbligatorio (text, NOT NULL)
-    data: formValues.data,
-    ora: formValues.ora,
-    azienda: formValues.azienda?.trim() || "",
-    referente: formValues.referente?.trim() || "",
-    telefono: formValues.telefono?.trim() || "",
-    email: formValues.email?.trim() || "",
-    piva: formValues.piva?.trim() || "",
-    indirizzo: formValues.indirizzo?.trim() || "",
-    citta: formValues["città"]?.trim() || "",          // "città" → citta
-    provincia: formValues.provincia?.trim() || "",
-    operatore: formValues.operatore?.trim() || "",
-    agente: formValues.agente?.trim() || "",
-    cliente: formValues.cliente?.trim() || "",
-    stato: formValues.stato || "programmato",
-    note: formValues.note || "",
-    fatturato: !!formValues.fatturato,
-    tipo_appuntamento:
-      String(formValues.tipo_appuntamento || "")
-        .toLowerCase()
-        .includes("video")
-        ? "videocall"
-        : "sede",
-    idContaq: formValues.idContaq?.trim() || "",       // opzionale (campo utente)
-    datainserimento,                                   // facoltativi ma utili, se li usi in DB
-    orainserimento,
-  };
+    const agenteCanon = canonicalizeAgent(formValues.agente, allAgentsRef.current);
 
-  const { error } = await supabase.from("appointments").insert(payload);
-  if (error) throw error;
+    const payload = {
+      id: makeAppointmentId(), // colonna NOT NULL senza default
+      data: formValues.data,
+      ora: formValues.ora,
+      azienda: formValues.azienda?.trim() || "",
+      referente: formValues.referente?.trim() || "",
+      telefono: formValues.telefono?.trim() || "",
+      email: formValues.email?.trim() || "",
+      piva: formValues.piva?.trim() || "",
+      indirizzo: formValues.indirizzo?.trim() || "",
+      citta: formValues["città"]?.trim() || "",
+      provincia: formValues.provincia?.trim() || "",
+      operatore: formValues.operatore?.trim() || "",
+      agente: agenteCanon,
+      cliente: formValues.cliente?.trim() || "",
+      stato: formValues.stato || "programmato",
+      note: formValues.note || "",
+      fatturato: !!formValues.fatturato,
+      tipo_appuntamento:
+        String(formValues.tipo_appuntamento || "")
+          .toLowerCase()
+          .includes("video")
+          ? "videocall"
+          : "sede",
+      idContaq: formValues.idContaq?.trim() || "",
+      datainserimento,
+      orainserimento,
+    };
 
-  // Se non usi realtime, puoi forzare un refresh:
-  // await loadEvents(currentRange.start, currentRange.end, agent);
+    const { error } = await supabase.from("appointments").insert(payload);
+    if (error) throw error;
 
-  return true; // chiude il modale se true
-}
-
-
+    return true;
+  }
 
   return (
     <div className="p-4 space-y-4">
@@ -337,13 +407,13 @@ async function handleCreateFromModal(formValues) {
               className="rounded-md border border-gray-300 px-2 py-1 text-sm"
             >
               <option value="tutti">Tutti</option>
-              {agents.map((a) => (
+              {allAgents.map((a) => (
                 <option key={a} value={a}>{a}</option>
               ))}
             </select>
           </label>
 
-          {loading ? (
+          {showLoading ? (
             <span className="text-sm text-gray-500">Carico gli appuntamenti…</span>
           ) : (
             <span className="text-sm text-gray-500">{events.length} eventi</span>
@@ -351,7 +421,7 @@ async function handleCreateFromModal(formValues) {
         </div>
       </header>
 
-      {/* Legenda colori agenti */}
+      {/* Legenda colori agenti (dagli eventi correnti) */}
       {legendAgents.length > 0 && (
         <div className="flex flex-wrap gap-3 text-xs">
           {legendAgents.map((a) => (
