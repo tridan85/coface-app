@@ -68,6 +68,12 @@ const CLIENTI_CANONICI = [
 const CLEAR_ALL_PASSWORD = "Password.2";
 const EDIT_PASSWORD = "123"; // ⬅️ password operativa per modifiche/annulli/cancellazioni
 
+// Normalizza un nome agente per confronti coerenti (spazi + Title Case)
+function normalizeAgentName(s = "") {
+  return titleCase(String(s).replace(/\s+/g, " ").trim());
+}
+
+
 // Normalizza i nomi: "mARIO roSSI" -> "Mario Rossi"
 function titleCase(s = "") {
   return String(s)
@@ -155,6 +161,15 @@ function tsFrom(dateStr, timeStr) {
   }
   return new Date(y, mo - 1, d, hh, mm, 0, 0).getTime();
 }
+
+
+// Versione “bella” per mostrare in UI (Title Case)
+function displayAgentName(s) {
+  const n = normalizeAgentName(s);
+  return n.split(" ").map(w => w ? w[0].toUpperCase() + w.slice(1) : "").join(" ");
+}
+
+
 function fmtDate(d) {
   if (!d) return "";
   try {
@@ -2742,18 +2757,18 @@ export default function CofaceAppuntamentiDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows]);
 
-  /* liste dinamiche */
+/* liste dinamiche */
 const agents = useMemo(() => {
-  const uniqLower = Array.from(
-    new Set(
-      rows
-        .map((r) => (r.agente || "").toLowerCase().replace(/\s+/g, " ").trim())
-        .filter(Boolean)
-    )
-  );
-  const display = uniqLower.map(titleCase);
-  return ["tutti", ...display.sort((a, b) => a.localeCompare(b))];
+  const set = new Set();
+
+  rows.forEach((r) => {
+    const norm = normalizeAgentName(r.agente);
+    if (norm) set.add(norm);
+  });
+
+  return ["tutti", ...Array.from(set).sort((a, b) => a.localeCompare(b, "it"))];
 }, [rows]);
+
 
   const creators = useMemo(
     () => ["tutti", ...Array.from(new Set(rows.map((r) => r.operatore).filter(Boolean).map(s => s.toLowerCase()))).sort((a, b) => a.localeCompare(b))],
@@ -2767,7 +2782,10 @@ const agents = useMemo(() => {
   /* filtra + ordina */
   const filtered = useMemo(() => {
     let out = rows;
-    if (agent !== "tutti") out = out.filter((r) => r.agente === agent);
+    if (agent !== "tutti") {
+      const key = normalizeAgentName(agent);
+      out = out.filter((r) => normalizeAgentName(r.agente) === key);
+    }  
     if (creator !== "tutti") out = out.filter((r) => r.operatore?.toLowerCase() === creator);
     if (client !== "tutti") out = out.filter((r) => r.cliente === client);
     if (status !== "tutti") out = out.filter((r) => r.stato === status);
@@ -2816,7 +2834,10 @@ const cancellationStats = useMemo(() => {
 
   // Base coerente con i filtri di contesto (agente/operatore/cliente + ricerca libera)
   let base = rows;
-  if (agent !== "tutti")   base = base.filter(r => r.agente === agent);
+  if (agent !== "tutti") {
+    const key = normalizeAgentName(agent);
+    base = base.filter(r => normalizeAgentName(r.agente) === key);
+  }  
   if (creator !== "tutti") base = base.filter(r => (r.operatore || "").toLowerCase() === creator);
   if (client !== "tutti")  base = base.filter(r => r.cliente === client);
   if (q?.trim()) {
@@ -2872,7 +2893,10 @@ const cancellationByClient = useMemo(() => {
 
   // stessa base dei filtri già usata per cancellationStats
   let base = rows;
-  if (agent !== "tutti")   base = base.filter(r => r.agente === agent);
+  if (agent !== "tutti") {
+    const key = normalizeAgentName(agent);
+    base = base.filter(r => normalizeAgentName(r.agente) === key);
+  }  
   if (creator !== "tutti") base = base.filter(r => (r.operatore || "").toLowerCase() === creator);
   if (client !== "tutti")  base = base.filter(r => r.cliente === client);
   if (q?.trim()) {
@@ -2925,7 +2949,10 @@ const cancellationDetailRows = useMemo(() => {
   // Base coerente con i filtri di contesto (agente/operatore/cliente + ricerca libera),
   // ignorando volutamente filtri di stato/data: l'intervallo è il mese selezionato.
   let base = rows;
-  if (agent !== "tutti")   base = base.filter(r => r.agente === agent);
+  if (agent !== "tutti") {
+    const key = normalizeAgentName(agent);
+    base = base.filter(r => normalizeAgentName(r.agente) === key);
+  }  
   if (creator !== "tutti") base = base.filter(r => (r.operatore || "").toLowerCase() === creator);
   if (client !== "tutti")  base = base.filter(r => r.cliente === client);
   if (q?.trim()) {
@@ -2980,7 +3007,10 @@ const todayByClient = useMemo(() => {
 
   // Base coerente con i filtri di contesto
   let base = rows;
-  if (agent !== "tutti")   base = base.filter(r => r.agente === agent);
+  if (agent !== "tutti") {
+    const key = normalizeAgentName(agent);
+    base = base.filter(r => normalizeAgentName(r.agente) === key);
+  }  
   if (creator !== "tutti") base = base.filter(r => (r.operatore || "").toLowerCase() === creator);
   if (client !== "tutti")  base = base.filter(r => r.cliente === client);
   if (q?.trim()) {

@@ -136,15 +136,20 @@ export default function CalendarioPage() {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
 
-  // 🔒 Lista agenti globale (sempre completa)
+  // Lista agenti completa (da appointments, con paginazione)
   const [allAgents, setAllAgents] = useState([]);
   const allAgentsRef = useRef([]);
   useEffect(() => { allAgentsRef.current = allAgents; }, [allAgents]);
 
-  // dropdown agente (mostriamo sempre tutti)
+  // ✅ Lista agenti ATTIVI (da tabella master `agenti`, se esiste)
+  const [activeAgents, setActiveAgents] = useState([]);
+  const activeAgentsRef = useRef([]);
+  useEffect(() => { activeAgentsRef.current = activeAgents; }, [activeAgents]);
+
+  // dropdown agente
   const [agent, setAgent] = useState("tutti");
 
-  // loading “gentile” per evitare lampeggio
+  // loading “gentile”
   const [showLoading, setShowLoading] = useState(false);
   useEffect(() => {
     if (!loading) { setShowLoading(false); return; }
@@ -175,50 +180,84 @@ export default function CalendarioPage() {
     return { start, end };
   }, [date, view]);
 
-// Carica TUTTI gli agenti (paginando) e deduplica case-insensitive
-useEffect(() => {
-  (async () => {
-    try {
-      const PAGE = 1000;                      // dimensione pagina
-      let from = 0;
-      const seen = new Map();                 // keyCI -> Nome Canonico
+  /* --------- Carica TUTTI gli agenti (paginando) --------- */
+  useEffect(() => {
+    (async () => {
+      try {
+        const PAGE = 1000;
+        let from = 0;
+        const seen = new Map();
+        while (true) {
+          const to = from + PAGE - 1;
+          const { data, error } = await supabase
+            .from("appointments")
+            .select("agente")
+            .not("agente", "is", null)
+            .neq("agente", "")
+            .order("agente", { ascending: true })
+            .range(from, to);
 
-      // cicla finché la pagina restituisce righe
-      while (true) {
-        const to = from + PAGE - 1;
-        const { data, error } = await supabase
-          .from("appointments")
-          .select("agente")                   // solo la colonna agente
-          .not("agente", "is", null)
-          .neq("agente", "")
-          .order("agente", { ascending: true })
-          .range(from, to);
+          if (error) throw error;
+          if (!data || data.length === 0) break;
 
-        if (error) throw error;
-        if (!data || data.length === 0) break;
+          for (const r of data) {
+            const t = toTitleCase(r.agente || "");
+            if (!t) continue;
+            const k = keyCI(t);
+            if (!seen.has(k)) seen.set(k, t);
+          }
 
-        for (const r of data) {
-          const t = toTitleCase(r.agente || "");
-          if (!t) continue;
-          const k = keyCI(t);
-          if (!seen.has(k)) seen.set(k, t);
+          if (data.length < PAGE) break;
+          from = to + 1;
+        }
+        const full = [...seen.values()].sort((a, b) => a.localeCompare(b, "it"));
+        setAllAgents(full);
+      } catch (e) {
+        setErrorMsg(`Errore agenti: ${e?.message || e}`);
+      }
+    })();
+  }, []);
+
+  /* --------- Carica AGENTI ATTIVI da tabella master `agenti` (se esiste) --------- */
+  useEffect(() => {
+    (async () => {
+      try {
+        // tentativo 1: colonna `nome`
+        let { data, error } = await supabase
+          .from("agenti")
+          .select("nome")
+          .order("nome", { ascending: true });
+
+        // tentativo 2: colonna alternativa `agente`
+        if (error || !data) {
+          const alt = await supabase
+            .from("agenti")
+            .select("agente")
+            .order("agente", { ascending: true });
+          data = alt.data; error = alt.error;
         }
 
-        // se l’ultima pagina è più corta di PAGE, abbiamo finito
-        if (data.length < PAGE) break;
-        from = to + 1;
+        if (error || !data) {
+          setActiveAgents([]); // fallback: nessun filtro
+          return;
+        }
+
+        const seen = new Map();
+        for (const r of data) {
+          const raw = r?.nome ?? r?.agente ?? "";
+          const canon = toTitleCase(raw || "");
+          if (!canon) continue;
+          const k = keyCI(canon);
+          if (!seen.has(k)) seen.set(k, canon);
+        }
+        setActiveAgents([...seen.values()]);
+      } catch {
+        setActiveAgents([]); // fallback
       }
+    })();
+  }, []);
 
-      const full = [...seen.values()].sort((a, b) => a.localeCompare(b, "it"));
-      setAllAgents(full);                     // 🔒 usata SEMPRE dalla tendina
-    } catch (e) {
-      setErrorMsg(`Errore agenti: ${e?.message || e}`);
-    }
-  })();
-}, []);
-
-
-  /* --------- Eventi per intervallo (nessun update sugli agenti!) --------- */
+  /* --------- Eventi per intervallo --------- */
   const loadEvents = useCallback(async (start, end, currentAgent) => {
     setLoading(true);
     setErrorMsg("");
@@ -238,7 +277,7 @@ useEffect(() => {
 
       if (error) throw error;
 
-      // filtro agente in memoria con normalizzazione + fuzzy (usando allAgentsRef)
+      // filtro agente in memoria con normalizzazione + fuzzy
       let rows = data || [];
       if (currentAgent && currentAgent !== "tutti") {
         const targetCanon = toTitleCase(currentAgent);
@@ -297,12 +336,15 @@ useEffect(() => {
     };
   }, []);
 
-  // Legenda agenti (da eventi correnti)
+  // Legenda agenti (filtrata sugli attivi se presenti)
   const legendAgents = useMemo(() => {
-    const names = [...new Set(events.map((e) => e?.resource?.agente).filter(Boolean))]
-      .sort((a, b) => String(a).localeCompare(String(b), "it"));
-    return names.map((name) => ({ name, color: colorForAgent(name) }));
-  }, [events]);
+    const names = [...new Set(events.map((e) => e?.resource?.agente).filter(Boolean))];
+    const base = activeAgents.length
+      ? names.filter((n) => activeAgents.some((a) => keyCI(a) === keyCI(n)))
+      : names;
+    const sorted = base.sort((a, b) => String(a).localeCompare(String(b), "it"));
+    return sorted.map((name) => ({ name, color: colorForAgent(name) }));
+  }, [events, activeAgents]);
 
   /* --------- Disponibilità: slot per agente (no sabato/no domenica) --------- */
   const availableSlotsByDay = useMemo(() => {
@@ -356,7 +398,9 @@ useEffect(() => {
     const datainserimento = toISO(now);
     const orainserimento = hhmm(now);
 
-    const agenteCanon = canonicalizeAgent(formValues.agente, allAgentsRef.current);
+    // usa elenco ATTIVO se presente, altrimenti quello completo
+    const baseList = activeAgentsRef.current.length ? activeAgentsRef.current : allAgentsRef.current;
+    const agenteCanon = canonicalizeAgent(formValues.agente, baseList);
 
     const payload = {
       id: makeAppointmentId(), // colonna NOT NULL senza default
@@ -407,7 +451,11 @@ useEffect(() => {
               className="rounded-md border border-gray-300 px-2 py-1 text-sm"
             >
               <option value="tutti">Tutti</option>
-              {allAgents.map((a) => (
+              {(
+                activeAgents.length
+                  ? allAgents.filter((a) => activeAgents.some((x) => keyCI(x) === keyCI(a)))
+                  : allAgents
+              ).map((a) => (
                 <option key={a} value={a}>{a}</option>
               ))}
             </select>
@@ -421,7 +469,7 @@ useEffect(() => {
         </div>
       </header>
 
-      {/* Legenda colori agenti (dagli eventi correnti) */}
+      {/* Legenda colori agenti (filtrata sugli attivi) */}
       {legendAgents.length > 0 && (
         <div className="flex flex-wrap gap-3 text-xs">
           {legendAgents.map((a) => (
