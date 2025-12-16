@@ -61,6 +61,7 @@ const CLIENTI_CANONICI = [
   "TCI MILANO 4",
   "TCI MACERATA",
   "TCI CATANIA",
+  "Credito e Cauzioni",
   "Satispay",   // ✅ nuovo cliente
 ];
 
