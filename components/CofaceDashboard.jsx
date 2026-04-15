@@ -65,6 +65,8 @@ const CLIENTI_CANONICI = [
   "Satispay",   // ✅ nuovo cliente
   "ASSICOOP",
   "GENERALI",
+  "ASSICOOP",
+  "GENERALI",
 ];
 
 
