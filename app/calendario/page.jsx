@@ -79,6 +79,8 @@ const CLIENTI_CANONICI = [
   "TCI MACERATA",
   "TCI CATANIA",
   "Satispay",
+  "ASSICOOP",
+  "GENERALI",
 ];
 
 /* ====== Normalizzazione & Fuzzy-matching agenti ====== */
