@@ -81,8 +81,7 @@ const CLIENTI_CANONICI = [
   "Satispay",
   "ASSICOOP",
   "GENERALI",
-  "ASSICOOP",
-  "GENERALI",
+  "Biella"
 ];
 
 /* ====== Normalizzazione & Fuzzy-matching agenti ====== */
