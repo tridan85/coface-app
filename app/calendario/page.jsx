@@ -3,9 +3,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Calendar, dateFnsLocalizer, Views } from "react-big-calendar";
 import {
-  parse, format,
-  startOfWeek, endOfWeek, startOfMonth, endOfMonth,
-  startOfDay, endOfDay, addMinutes, isSameDay, setHours, setMinutes,
+  parse,
+  format,
+  startOfWeek,
+  endOfWeek,
+  startOfMonth,
+  endOfMonth,
+  startOfDay,
+  endOfDay,
+  addMinutes,
+  isSameDay,
+  setHours,
+  setMinutes,
 } from "date-fns";
 import it from "date-fns/locale/it";
 import "react-big-calendar/lib/css/react-big-calendar.css";
@@ -17,7 +26,7 @@ const supabase =
   globalThis.__sb ||
   (globalThis.__sb = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
   ));
 
 /* ============== Localizer IT ============== */
@@ -40,7 +49,8 @@ function toISO(d) {
 function buildDate(dateISO, hhmm) {
   const d = dateISO instanceof Date ? dateISO : new Date(dateISO);
   if (Number.isNaN(d.getTime())) return null;
-  let h = 9, m = 0;
+  let h = 9,
+    m = 0;
   if (typeof hhmm === "string" && /^\d{1,2}:\d{2}$/.test(hhmm)) {
     const [H, M] = hhmm.split(":").map((x) => parseInt(x, 10));
     if (!Number.isNaN(H)) h = H;
@@ -50,19 +60,38 @@ function buildDate(dateISO, hhmm) {
   out.setHours(h, m, 0, 0);
   return out;
 }
-function endPlus1h(dt) { if (!dt) return null; const out = new Date(dt); out.setMinutes(out.getMinutes() + 60); return out; }
-function hhmm(date) { return format(date, "HH:mm", { locale: it }); }
+function endPlus1h(dt) {
+  if (!dt) return null;
+  const out = new Date(dt);
+  out.setMinutes(out.getMinutes() + 60);
+  return out;
+}
+function hhmm(date) {
+  return format(date, "HH:mm", { locale: it });
+}
 
 // Colore deterministico per agente
 function colorForAgent(name = "") {
-  const palette = ["#60a5fa","#f472b6","#34d399","#f59e0b","#a78bfa","#f87171","#38bdf8","#fb923c","#4ade80","#c084fc"];
-  let h = 0; const s = String(name || "");
+  const palette = [
+    "#60a5fa",
+    "#f472b6",
+    "#34d399",
+    "#f59e0b",
+    "#a78bfa",
+    "#f87171",
+    "#38bdf8",
+    "#fb923c",
+    "#4ade80",
+    "#c084fc",
+  ];
+  let h = 0;
+  const s = String(name || "");
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
   return palette[h % palette.length];
 }
 
 /* ====== Parametri disponibilità ====== */
-const SLOT_MINUTES = 60;   // durata appuntamento
+const SLOT_MINUTES = 60; // durata appuntamento
 const BUFFER_MINUTES = 60; // distanza minima tra appuntamenti
 const WORK_START_HOUR = 9;
 const WORK_END_HOUR = 18;
@@ -81,7 +110,9 @@ const CLIENTI_CANONICI = [
   "Satispay",
   "ASSICOOP",
   "GENERALI",
-  "Biella"
+  "Biella",
+  "ASSIPIACENZA",
+  "DIE",
 ];
 
 /* ====== Normalizzazione & Fuzzy-matching agenti ====== */
@@ -96,9 +127,10 @@ function keyCI(s = "") {
   return s.trim().replace(/\s+/g, " ").toLowerCase();
 }
 function levenshtein(a = "", b = "") {
-  a = a.toLowerCase(); b = b.toLowerCase();
+  a = a.toLowerCase();
+  b = b.toLowerCase();
   const dp = Array.from({ length: a.length + 1 }, (_, i) =>
-    Array(b.length + 1).fill(0)
+    Array(b.length + 1).fill(0),
   );
   for (let i = 0; i <= a.length; i++) dp[i][0] = i;
   for (let j = 0; j <= b.length; j++) dp[0][j] = j;
@@ -108,7 +140,7 @@ function levenshtein(a = "", b = "") {
       dp[i][j] = Math.min(
         dp[i - 1][j] + 1,
         dp[i][j - 1] + 1,
-        dp[i - 1][j - 1] + cost
+        dp[i - 1][j - 1] + cost,
       );
     }
   }
@@ -118,13 +150,19 @@ function canonicalizeAgent(input, knownAgents, fuzzyMaxDistance = 2) {
   const raw = (input || "").trim();
   if (!raw) return "";
   const k = keyCI(raw);
-  const dict = new Map((knownAgents || []).map((n) => [keyCI(n), toTitleCase(n)]));
+  const dict = new Map(
+    (knownAgents || []).map((n) => [keyCI(n), toTitleCase(n)]),
+  );
   if (dict.has(k)) return dict.get(k);
 
-  let best = null, bestDist = Infinity;
+  let best = null,
+    bestDist = Infinity;
   for (const [lk, canon] of dict.entries()) {
     const dist = levenshtein(k, lk);
-    if (dist < bestDist) { bestDist = dist; best = canon; }
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = canon;
+    }
   }
   if (best && bestDist <= fuzzyMaxDistance) return best;
 
@@ -142,12 +180,16 @@ export default function CalendarioPage() {
   // Lista agenti completa (da appointments, con paginazione)
   const [allAgents, setAllAgents] = useState([]);
   const allAgentsRef = useRef([]);
-  useEffect(() => { allAgentsRef.current = allAgents; }, [allAgents]);
+  useEffect(() => {
+    allAgentsRef.current = allAgents;
+  }, [allAgents]);
 
   // ✅ Lista agenti ATTIVI (da tabella master `agenti`, se esiste)
   const [activeAgents, setActiveAgents] = useState([]);
   const activeAgentsRef = useRef([]);
-  useEffect(() => { activeAgentsRef.current = activeAgents; }, [activeAgents]);
+  useEffect(() => {
+    activeAgentsRef.current = activeAgents;
+  }, [activeAgents]);
 
   // dropdown agente
   const [agent, setAgent] = useState("tutti");
@@ -155,7 +197,10 @@ export default function CalendarioPage() {
   // loading “gentile”
   const [showLoading, setShowLoading] = useState(false);
   useEffect(() => {
-    if (!loading) { setShowLoading(false); return; }
+    if (!loading) {
+      setShowLoading(false);
+      return;
+    }
     const t = setTimeout(() => setShowLoading(true), 200);
     return () => clearTimeout(t);
   }, [loading]);
@@ -213,7 +258,9 @@ export default function CalendarioPage() {
           if (data.length < PAGE) break;
           from = to + 1;
         }
-        const full = [...seen.values()].sort((a, b) => a.localeCompare(b, "it"));
+        const full = [...seen.values()].sort((a, b) =>
+          a.localeCompare(b, "it"),
+        );
         setAllAgents(full);
       } catch (e) {
         setErrorMsg(`Errore agenti: ${e?.message || e}`);
@@ -237,7 +284,8 @@ export default function CalendarioPage() {
             .from("agenti")
             .select("agente")
             .order("agente", { ascending: true });
-          data = alt.data; error = alt.error;
+          data = alt.data;
+          error = alt.error;
         }
 
         if (error || !data) {
@@ -266,13 +314,16 @@ export default function CalendarioPage() {
     setErrorMsg("");
 
     const startISO = toISO(start);
-    const endPlus = new Date(end); endPlus.setDate(endPlus.getDate() + 1);
+    const endPlus = new Date(end);
+    endPlus.setDate(endPlus.getDate() + 1);
     const endISO = toISO(endPlus);
 
     try {
       const { data, error } = await supabase
         .from("appointments")
-        .select("id, data, ora, azienda, cliente, agente, operatore, stato", { count: "exact" })
+        .select("id, data, ora, azienda, cliente, agente, operatore, stato", {
+          count: "exact",
+        })
         .gte("data", startISO)
         .lt("data", endISO)
         .order("data", { ascending: true })
@@ -285,7 +336,10 @@ export default function CalendarioPage() {
       if (currentAgent && currentAgent !== "tutti") {
         const targetCanon = toTitleCase(currentAgent);
         rows = rows.filter((r) => {
-          const canon = canonicalizeAgent(r.agente, [currentAgent, ...allAgentsRef.current]);
+          const canon = canonicalizeAgent(r.agente, [
+            currentAgent,
+            ...allAgentsRef.current,
+          ]);
           return keyCI(canon) === keyCI(targetCanon);
         });
       }
@@ -293,7 +347,7 @@ export default function CalendarioPage() {
       const mapped = rows
         .map((r) => {
           const startDt = buildDate(r?.data, r?.ora);
-          const endDt   = endPlus1h(startDt);
+          const endDt = endPlus1h(startDt);
           if (!startDt || !endDt) return null;
 
           const agentCanon = toTitleCase(r?.agente || "");
@@ -335,39 +389,56 @@ export default function CalendarioPage() {
       if (stato.includes("annull")) bg = "#dc2626";
       else if (stato.includes("svolt")) bg = "#16a34a";
       else if (stato.includes("programm")) bg = "#f59e0b";
-      return { style: { backgroundColor: bg, color: "white", borderRadius: 6, border: 0 } };
+      return {
+        style: {
+          backgroundColor: bg,
+          color: "white",
+          borderRadius: 6,
+          border: 0,
+        },
+      };
     };
   }, []);
 
   // Legenda agenti (filtrata sugli attivi se presenti)
   const legendAgents = useMemo(() => {
-    const names = [...new Set(events.map((e) => e?.resource?.agente).filter(Boolean))];
+    const names = [
+      ...new Set(events.map((e) => e?.resource?.agente).filter(Boolean)),
+    ];
     const base = activeAgents.length
       ? names.filter((n) => activeAgents.some((a) => keyCI(a) === keyCI(n)))
       : names;
-    const sorted = base.sort((a, b) => String(a).localeCompare(String(b), "it"));
+    const sorted = base.sort((a, b) =>
+      String(a).localeCompare(String(b), "it"),
+    );
     return sorted.map((name) => ({ name, color: colorForAgent(name) }));
   }, [events, activeAgents]);
 
   /* --------- Disponibilità: slot per agente (no sabato/no domenica) --------- */
   const availableSlotsByDay = useMemo(() => {
     if (!agent || agent === "tutti") return {};
-    const agentEvents = events.filter((e) => (e?.resource?.agente || "") === agent);
+    const agentEvents = events.filter(
+      (e) => (e?.resource?.agente || "") === agent,
+    );
 
     const occupied = agentEvents.map((e) => ({
       start: addMinutes(e.start, -BUFFER_MINUTES),
       end: addMinutes(e.end, BUFFER_MINUTES),
     }));
-    const overlaps = (aStart, aEnd) => occupied.some(({ start, end }) => aStart < end && aEnd > start);
+    const overlaps = (aStart, aEnd) =>
+      occupied.some(({ start, end }) => aStart < end && aEnd > start);
 
     const out = {};
-    const dayCount = Math.ceil((currentRange.end - currentRange.start) / (1000 * 60 * 60 * 24)) + 1;
+    const dayCount =
+      Math.ceil(
+        (currentRange.end - currentRange.start) / (1000 * 60 * 60 * 24),
+      ) + 1;
 
     for (let i = 0; i < dayCount; i++) {
       const day = new Date(
         currentRange.start.getFullYear(),
         currentRange.start.getMonth(),
-        currentRange.start.getDate() + i
+        currentRange.start.getDate() + i,
       );
 
       const dow = day.getDay();
@@ -402,7 +473,9 @@ export default function CalendarioPage() {
     const orainserimento = hhmm(now);
 
     // usa elenco ATTIVO se presente, altrimenti quello completo
-    const baseList = activeAgentsRef.current.length ? activeAgentsRef.current : allAgentsRef.current;
+    const baseList = activeAgentsRef.current.length
+      ? activeAgentsRef.current
+      : allAgentsRef.current;
     const agenteCanon = canonicalizeAgent(formValues.agente, baseList);
 
     const payload = {
@@ -423,12 +496,11 @@ export default function CalendarioPage() {
       stato: formValues.stato || "programmato",
       note: formValues.note || "",
       fatturato: !!formValues.fatturato,
-      tipo_appuntamento:
-        String(formValues.tipo_appuntamento || "")
-          .toLowerCase()
-          .includes("video")
-          ? "videocall"
-          : "sede",
+      tipo_appuntamento: String(formValues.tipo_appuntamento || "")
+        .toLowerCase()
+        .includes("video")
+        ? "videocall"
+        : "sede",
       idContaq: formValues.idContaq?.trim() || "",
       datainserimento,
       orainserimento,
@@ -454,20 +526,27 @@ export default function CalendarioPage() {
               className="rounded-md border border-gray-300 px-2 py-1 text-sm"
             >
               <option value="tutti">Tutti</option>
-              {(
-                activeAgents.length
-                  ? allAgents.filter((a) => activeAgents.some((x) => keyCI(x) === keyCI(a)))
-                  : allAgents
+              {(activeAgents.length
+                ? allAgents.filter((a) =>
+                    activeAgents.some((x) => keyCI(x) === keyCI(a)),
+                  )
+                : allAgents
               ).map((a) => (
-                <option key={a} value={a}>{a}</option>
+                <option key={a} value={a}>
+                  {a}
+                </option>
               ))}
             </select>
           </label>
 
           {showLoading ? (
-            <span className="text-sm text-gray-500">Carico gli appuntamenti…</span>
+            <span className="text-sm text-gray-500">
+              Carico gli appuntamenti…
+            </span>
           ) : (
-            <span className="text-sm text-gray-500">{events.length} eventi</span>
+            <span className="text-sm text-gray-500">
+              {events.length} eventi
+            </span>
           )}
         </div>
       </header>
@@ -477,14 +556,19 @@ export default function CalendarioPage() {
         <div className="flex flex-wrap gap-3 text-xs">
           {legendAgents.map((a) => (
             <span key={a.name} className="inline-flex items-center gap-1">
-              <span className="inline-block h-2 w-2 rounded-full" style={{ background: a.color }} />
+              <span
+                className="inline-block h-2 w-2 rounded-full"
+                style={{ background: a.color }}
+              />
               {a.name}
             </span>
           ))}
         </div>
       )}
 
-      {errorMsg && <div className="text-red-600 text-sm">Errore: {errorMsg}</div>}
+      {errorMsg && (
+        <div className="text-red-600 text-sm">Errore: {errorMsg}</div>
+      )}
 
       {/* Calendario + Sidebar */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-4">
@@ -505,12 +589,19 @@ export default function CalendarioPage() {
             popup
             eventPropGetter={eventPropGetter}
             formats={{
-              eventTimeRangeFormat: ({ start, end }) => `${hhmm(start)}–${hhmm(end)}`,
-              agendaTimeRangeFormat: ({ start, end }) => `${hhmm(start)}–${hhmm(end)}`,
+              eventTimeRangeFormat: ({ start, end }) =>
+                `${hhmm(start)}–${hhmm(end)}`,
+              agendaTimeRangeFormat: ({ start, end }) =>
+                `${hhmm(start)}–${hhmm(end)}`,
             }}
             messages={{
-              agenda: "Agenda", day: "Giorno", week: "Settimana", month: "Mese",
-              today: "Oggi", previous: "Indietro", next: "Avanti",
+              agenda: "Agenda",
+              day: "Giorno",
+              week: "Settimana",
+              month: "Mese",
+              today: "Oggi",
+              previous: "Indietro",
+              next: "Avanti",
               showMore: (total) => `+${total} altri`,
               noEventsInRange: "Nessun evento nel periodo",
             }}
@@ -520,9 +611,13 @@ export default function CalendarioPage() {
         {/* Sidebar disponibilità */}
         <aside className="h-[78vh] overflow-auto rounded-lg border border-gray-200 p-3">
           <div className="mb-3">
-            <h2 className="text-sm font-semibold">Disponibilità (durata 1h, distanza 1h)</h2>
+            <h2 className="text-sm font-semibold">
+              Disponibilità (durata 1h, distanza 1h)
+            </h2>
             {agent === "tutti" && (
-              <p className="text-xs text-gray-500 mt-1">Seleziona un agente per vedere gli slot disponibili.</p>
+              <p className="text-xs text-gray-500 mt-1">
+                Seleziona un agente per vedere gli slot disponibili.
+              </p>
             )}
           </div>
 
@@ -531,10 +626,14 @@ export default function CalendarioPage() {
               {Object.entries(availableSlotsByDay).map(([dayISO, slots]) => (
                 <div key={dayISO} className="border-b pb-3 last:border-0">
                   <div className="text-xs font-medium text-gray-700 mb-2">
-                    {format(new Date(dayISO), "EEEE d MMMM yyyy", { locale: it })}
+                    {format(new Date(dayISO), "EEEE d MMMM yyyy", {
+                      locale: it,
+                    })}
                   </div>
                   {slots.length === 0 ? (
-                    <div className="text-xs text-gray-400">Nessuno slot disponibile</div>
+                    <div className="text-xs text-gray-400">
+                      Nessuno slot disponibile
+                    </div>
                   ) : (
                     <div className="flex flex-wrap gap-2">
                       {slots.map(({ start }) => {

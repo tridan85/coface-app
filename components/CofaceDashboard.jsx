@@ -34,7 +34,6 @@ import * as XLSX from "xlsx";
 import LogoutButton from "@/components/LogoutButton";
 import Link from "next/link";
 
-
 // Supabase client lato browser
 import { getSupabaseClient } from "@/lib/supabaseClient";
 import CreateAppointmentModal from "@/components/CreateAppointmentModal";
@@ -62,12 +61,13 @@ const CLIENTI_CANONICI = [
   "TCI MACERATA",
   "TCI CATANIA",
   "Credito e Cauzioni",
-  "Satispay",   // ✅ nuovo cliente
+  "Satispay", // ✅ nuovo cliente
   "ASSICOOP",
   "GENERALI",
   "Biella",
+  "ASSIPIACENZA",
+  "DIE",
 ];
-
 
 const CLEAR_ALL_PASSWORD = "Password.2";
 const EDIT_PASSWORD = "123"; // ⬅️ password operativa per modifiche/annulli/cancellazioni
@@ -76,7 +76,6 @@ const EDIT_PASSWORD = "123"; // ⬅️ password operativa per modifiche/annulli/
 function normalizeAgentName(s = "") {
   return titleCase(String(s).replace(/\s+/g, " ").trim());
 }
-
 
 // Normalizza i nomi: "mARIO roSSI" -> "Mario Rossi"
 function titleCase(s = "") {
@@ -88,7 +87,6 @@ function titleCase(s = "") {
     .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : ""))
     .join(" ");
 }
-
 
 // ---- FIX DATE: helper che restituisce yyyy-mm-dd in LOCALE (no UTC) ----
 function dateToLocalISO(d) {
@@ -131,7 +129,7 @@ function parseExcelTime(v) {
     let frac = v - Math.floor(v);
     if (frac === 0 && v >= 0 && v <= 24) return `${pad(Math.floor(v))}:00`;
     let totalMin = Math.round(frac * 24 * 60);
-    totalMin = ((totalMin % (24 * 60)) + (24 * 60)) % (24 * 60);
+    totalMin = ((totalMin % (24 * 60)) + 24 * 60) % (24 * 60);
     const hh = Math.floor(totalMin / 60);
     const mm = totalMin % 60;
     return `${pad(hh)}:${pad(mm)}`;
@@ -157,22 +155,29 @@ function tsFrom(dateStr, timeStr) {
   if (!dateStr) return NaN;
   const m = String(dateStr).match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) return NaN;
-  const y = +m[1], mo = +m[2], d = +m[3];
-  let hh = 0, mm = 0;
+  const y = +m[1],
+    mo = +m[2],
+    d = +m[3];
+  let hh = 0,
+    mm = 0;
   if (timeStr) {
     const t = String(timeStr).match(/^(\d{1,2}):(\d{1,2})$/);
-    if (t) { hh = +t[1]; mm = +t[2]; }
+    if (t) {
+      hh = +t[1];
+      mm = +t[2];
+    }
   }
   return new Date(y, mo - 1, d, hh, mm, 0, 0).getTime();
 }
 
-
 // Versione “bella” per mostrare in UI (Title Case)
 function displayAgentName(s) {
   const n = normalizeAgentName(s);
-  return n.split(" ").map(w => w ? w[0].toUpperCase() + w.slice(1) : "").join(" ");
+  return n
+    .split(" ")
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : ""))
+    .join(" ");
 }
-
 
 function fmtDate(d) {
   if (!d) return "";
@@ -196,7 +201,11 @@ async function exportAllCSV() {
     setIsExporting?.(true);
     const allRows = await fetchAllAppointmentsPaged(1000);
     const csv = toCSV(allRows);
-    downloadFile(csv, `coface_appuntamenti_ALL_${todayISO()}.csv`, "text/csv;charset=utf-8");
+    downloadFile(
+      csv,
+      `coface_appuntamenti_ALL_${todayISO()}.csv`,
+      "text/csv;charset=utf-8",
+    );
   } catch (e) {
     console.error("Export CSV (ALL) error:", e);
     alert("Errore durante l'esportazione completa in CSV.");
@@ -210,7 +219,7 @@ async function exportAllExcel() {
     setIsExporting?.(true);
     const allRows = await fetchAllAppointmentsPaged(1000);
     const wb = toExcelWorkbook(allRows); // riusa il tuo builder esistente
-    const blob = workbookToBlob(wb);     // o equivalente utility che già usi
+    const blob = workbookToBlob(wb); // o equivalente utility che già usi
     downloadBlob(blob, `coface_appuntamenti_ALL_${todayISO()}.xlsx`);
   } catch (e) {
     console.error("Export Excel (ALL) error:", e);
@@ -219,7 +228,6 @@ async function exportAllExcel() {
     setIsExporting?.(false);
   }
 }
-
 
 function aggregateByMonth(rows, dateKey) {
   const map = new Map();
@@ -238,149 +246,174 @@ function aggregateByMonth(rows, dateKey) {
     .slice(-12);
 }
 function generateId() {
-  return (Date.now().toString(36) + Math.random().toString(36).slice(2, 8)).toUpperCase();
+  return (
+    Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+  ).toUpperCase();
 }
 
-  // DB -> UI
-  function rowFromDb(db) {
-    const dataInserimento =
-      db.dataInserimento ?? db.datainserimento ?? db.data_inserimento ?? null;
-    const oraInserimento =
-      db.oraInserimento ?? db.orainserimento ?? db.ora_inserimento ?? "";
+// DB -> UI
+function rowFromDb(db) {
+  const dataInserimento =
+    db.dataInserimento ?? db.datainserimento ?? db.data_inserimento ?? null;
+  const oraInserimento =
+    db.oraInserimento ?? db.orainserimento ?? db.ora_inserimento ?? "";
 
-    // normalizza tipo per la UI (sede | videocall | null)
-    const tipoNorm = (() => {
-      const k = String(db.tipo_appuntamento ?? "")
-        .normalize("NFKC")
-        .replace(/\u00A0/g, " ")   // NBSP -> spazio
-        .replace(/_/g, " ")        // underscore -> spazio
-        .trim()
-        .replace(/\s+/g, " ")      // spazi multipli -> singolo
-        .toLowerCase();
-      if (!k) return null;
-      if (k === "sede" || k === "in sede") return "sede";
-      if (k === "videocall" || k === "video call" || k === "video-call") return "videocall";
-      return null;
-    })();
+  // normalizza tipo per la UI (sede | videocall | null)
+  const tipoNorm = (() => {
+    const k = String(db.tipo_appuntamento ?? "")
+      .normalize("NFKC")
+      .replace(/\u00A0/g, " ") // NBSP -> spazio
+      .replace(/_/g, " ") // underscore -> spazio
+      .trim()
+      .replace(/\s+/g, " ") // spazi multipli -> singolo
+      .toLowerCase();
+    if (!k) return null;
+    if (k === "sede" || k === "in sede") return "sede";
+    if (k === "videocall" || k === "video call" || k === "video-call")
+      return "videocall";
+    return null;
+  })();
 
-    return {
-      id: db.id,
-      dataInserimento,
-      oraInserimento,
+  return {
+    id: db.id,
+    dataInserimento,
+    oraInserimento,
 
-      data: db.data ?? null,
-      ora: db.ora ?? "",
-      azienda: db.azienda ?? "",
-      referente: db.referente ?? "",
-      telefono: db.telefono ?? "",
-      email: db.email ?? "",
-      piva: db.piva ?? "",
-      indirizzo: db.indirizzo ?? "",
-      città: db.citta ?? db["città"] ?? "",
-      provincia: db.provincia ?? "",
-      agente: db.agente ?? "",
-      operatore: db.operatore ?? "",
-      cliente: db.cliente ?? "Coface",
-      stato: db.stato ?? "programmato",
-      tipo_appuntamento: tipoNorm,
-      note: db.note ?? "",
-      idContaq: db.idContaq ?? "",
-      dataAnnullamento: db.dataAnnullamento ?? null,
-      dataFatturazione: db.dataFatturazione ?? null,
-      fatturato: !!db.fatturato,
-      confermato: !!db.confermato,
+    data: db.data ?? null,
+    ora: db.ora ?? "",
+    azienda: db.azienda ?? "",
+    referente: db.referente ?? "",
+    telefono: db.telefono ?? "",
+    email: db.email ?? "",
+    piva: db.piva ?? "",
+    indirizzo: db.indirizzo ?? "",
+    città: db.citta ?? db["città"] ?? "",
+    provincia: db.provincia ?? "",
+    agente: db.agente ?? "",
+    operatore: db.operatore ?? "",
+    cliente: db.cliente ?? "Coface",
+    stato: db.stato ?? "programmato",
+    tipo_appuntamento: tipoNorm,
+    note: db.note ?? "",
+    idContaq: db.idContaq ?? "",
+    dataAnnullamento: db.dataAnnullamento ?? null,
+    dataFatturazione: db.dataFatturazione ?? null,
+    fatturato: !!db.fatturato,
+    confermato: !!db.confermato,
 
-      created_at: db.created_at ?? null,
-      updated_at: db.updated_at ?? null,
-    };
-  }
+    created_at: db.created_at ?? null,
+    updated_at: db.updated_at ?? null,
+  };
+}
 
 const toNull = (v) => (v === "" || v === undefined ? null : v);
-  // UI -> DB
-  function rowToDb(js) {
-    // normalizza tipo per il DB (sede | videocall | null)
-    const tipoNorm = (() => {
-      const k = String(js?.tipo_appuntamento ?? js?.tipoAppuntamento ?? "")
-        .normalize("NFKC")
-        .replace(/\u00A0/g, " ")
-        .replace(/_/g, " ")
-        .trim()
-        .replace(/\s+/g, " ")
-        .toLowerCase();
-      if (!k) return null;
-      if (k === "sede" || k === "in sede") return "sede";
-      if (k === "videocall" || k === "video call" || k === "video-call") return "videocall";
-      return null;
-    })();
+// UI -> DB
+function rowToDb(js) {
+  // normalizza tipo per il DB (sede | videocall | null)
+  const tipoNorm = (() => {
+    const k = String(js?.tipo_appuntamento ?? js?.tipoAppuntamento ?? "")
+      .normalize("NFKC")
+      .replace(/\u00A0/g, " ")
+      .replace(/_/g, " ")
+      .trim()
+      .replace(/\s+/g, " ")
+      .toLowerCase();
+    if (!k) return null;
+    if (k === "sede" || k === "in sede") return "sede";
+    if (k === "videocall" || k === "video call" || k === "video-call")
+      return "videocall";
+    return null;
+  })();
 
-    return {
-      id: js.id,
+  return {
+    id: js.id,
 
-      // 👉 usa i nomi REALI delle colonne nel DB (minuscolo)
-      dataInserimento: js.dataInserimento ?? null,
-      oraInserimento: js.oraInserimento ?? "",
+    // 👉 usa i nomi REALI delle colonne nel DB (minuscolo)
+    dataInserimento: js.dataInserimento ?? null,
+    oraInserimento: js.oraInserimento ?? "",
 
-      data: js.data ?? null,
-      ora: js.ora ?? "",
-      azienda: js.azienda ?? "",
-      referente: js.referente ?? "",
-      telefono: js.telefono ?? "",
-      email: js.email ?? "",
-      piva: js.piva ?? "",
-      indirizzo: js.indirizzo ?? "",
-      citta: js["città"] ?? js.citta ?? "",
-      provincia: js.provincia ?? "",
-      agente: js.agente ?? "",
-      operatore: js.operatore ?? "",
-      cliente: js.cliente ?? "Coface",
-      stato: js.stato ?? "programmato",
-      tipo_appuntamento: tipoNorm,
-      note: js.note ?? "",
-      idContaq: js.idContaq ?? "",
-      dataAnnullamento: js.dataAnnullamento ?? null,
-      dataFatturazione: js.dataFatturazione ?? null,
-      fatturato: !!js.fatturato,
-      confermato: !!js.confermato,
-    };
+    data: js.data ?? null,
+    ora: js.ora ?? "",
+    azienda: js.azienda ?? "",
+    referente: js.referente ?? "",
+    telefono: js.telefono ?? "",
+    email: js.email ?? "",
+    piva: js.piva ?? "",
+    indirizzo: js.indirizzo ?? "",
+    citta: js["città"] ?? js.citta ?? "",
+    provincia: js.provincia ?? "",
+    agente: js.agente ?? "",
+    operatore: js.operatore ?? "",
+    cliente: js.cliente ?? "Coface",
+    stato: js.stato ?? "programmato",
+    tipo_appuntamento: tipoNorm,
+    note: js.note ?? "",
+    idContaq: js.idContaq ?? "",
+    dataAnnullamento: js.dataAnnullamento ?? null,
+    dataFatturazione: js.dataFatturazione ?? null,
+    fatturato: !!js.fatturato,
+    confermato: !!js.confermato,
+  };
+}
+
+// ⬇️ Mappa SOLO le chiavi presenti nel patch dalla UI al DB
+function patchToDb(patch = {}) {
+  const out = {};
+
+  // usa toNull già definito sopra nel file
+  // rinomina "città" -> citta se presente nel patch
+  if ("città" in patch || "citta" in patch)
+    out.citta = patch["città"] ?? patch.citta;
+
+  // chiavi con lo stesso nome tra UI e DB: copiale solo se presenti nel patch
+  const same = [
+    "id",
+    "dataInserimento",
+    "oraInserimento",
+    "data",
+    "ora",
+    "azienda",
+    "referente",
+    "telefono",
+    "email",
+    "piva",
+    "indirizzo",
+    "provincia",
+    "agente",
+    "operatore",
+    "cliente",
+    "stato",
+    "note",
+    "idContaq",
+    "fatturato",
+    "confermato",
+  ];
+  for (const k of same) if (k in patch) out[k] = patch[k];
+
+  // date che vanno a null se stringa vuota
+  if ("dataAnnullamento" in patch)
+    out.dataAnnullamento = toNull(patch.dataAnnullamento);
+  if ("dataFatturazione" in patch)
+    out.dataFatturazione = toNull(patch.dataFatturazione);
+
+  // normalizza tipo appuntamento SOLO se presente nel patch
+  if ("tipo_appuntamento" in patch || "tipoAppuntamento" in patch) {
+    const raw = patch.tipo_appuntamento ?? patch.tipoAppuntamento ?? "";
+    const key = String(raw)
+      .normalize("NFKC")
+      .replace(/\u00A0/g, " ")
+      .replace(/_/g, " ")
+      .trim()
+      .replace(/\s+/g, " ")
+      .toLowerCase();
+    if (key === "sede" || key === "in sede") out.tipo_appuntamento = "sede";
+    else if (["videocall", "video call", "video-call"].includes(key))
+      out.tipo_appuntamento = "videocall";
+    else out.tipo_appuntamento = null;
   }
 
-    // ⬇️ Mappa SOLO le chiavi presenti nel patch dalla UI al DB
-  function patchToDb(patch = {}) {
-    const out = {};
-
-    // usa toNull già definito sopra nel file
-    // rinomina "città" -> citta se presente nel patch
-    if ("città" in patch || "citta" in patch) out.citta = patch["città"] ?? patch.citta;
-
-    // chiavi con lo stesso nome tra UI e DB: copiale solo se presenti nel patch
-    const same = [
-      "id","dataInserimento","oraInserimento","data","ora","azienda","referente",
-      "telefono","email","piva","indirizzo","provincia","agente","operatore",
-      "cliente","stato","note","idContaq","fatturato","confermato"
-    ];
-    for (const k of same) if (k in patch) out[k] = patch[k];
-
-    // date che vanno a null se stringa vuota
-    if ("dataAnnullamento" in patch) out.dataAnnullamento = toNull(patch.dataAnnullamento);
-    if ("dataFatturazione" in patch) out.dataFatturazione = toNull(patch.dataFatturazione);
-
-    // normalizza tipo appuntamento SOLO se presente nel patch
-    if ("tipo_appuntamento" in patch || "tipoAppuntamento" in patch) {
-      const raw = patch.tipo_appuntamento ?? patch.tipoAppuntamento ?? "";
-      const key = String(raw)
-        .normalize("NFKC")
-        .replace(/\u00A0/g, " ")
-        .replace(/_/g, " ")
-        .trim()
-        .replace(/\s+/g, " ")
-        .toLowerCase();
-      if (key === "sede" || key === "in sede") out.tipo_appuntamento = "sede";
-      else if (["videocall","video call","video-call"].includes(key)) out.tipo_appuntamento = "videocall";
-      else out.tipo_appuntamento = null;
-    }
-
-    return out;
-  }
+  return out;
+}
 
 // Scarica tutto il DB a pagine da 1000
 async function fetchAllAppointmentsPaged(pageSize = 1000) {
@@ -404,8 +437,6 @@ async function fetchAllAppointmentsPaged(pageSize = 1000) {
   }
   return all;
 }
-
-
 
 /* Excel headers del template */
 const DEFAULT_HEADERS = [
@@ -445,30 +476,30 @@ function joinEmails(v) {
 function gmailComposeUrl({ to, cc, bcc, subject, body }) {
   const enc = encodeURIComponent;
   const base = "https://mail.google.com/mail/u/0/?view=cm&fs=1&tf=cm";
-  const toStr  = joinEmails(to);
-  const ccStr  = joinEmails(cc);
+  const toStr = joinEmails(to);
+  const ccStr = joinEmails(cc);
   const bccStr = joinEmails(bcc);
 
   let url = `${base}&to=${enc(toStr)}`;
-  if (ccStr)  url += `&cc=${enc(ccStr)}`;
+  if (ccStr) url += `&cc=${enc(ccStr)}`;
   if (bccStr) url += `&bcc=${enc(bccStr)}`;
   if (subject) url += `&su=${enc(subject)}`;
-  if (body)    url += `&body=${enc(body)}`;
+  if (body) url += `&body=${enc(body)}`;
   return url;
 }
 
 /** build mailto: (usato solo per il fallback “ufficiale” di Gmail) */
 function mailtoUrl({ to, cc, bcc, subject, body }) {
   const enc = encodeURIComponent;
-  const toStr  = joinEmails(to);
-  const ccStr  = joinEmails(cc);
+  const toStr = joinEmails(to);
+  const ccStr = joinEmails(cc);
   const bccStr = joinEmails(bcc);
 
   const parts = [];
   if (subject) parts.push(`subject=${enc(subject)}`);
-  if (body)    parts.push(`body=${enc(body)}`);
-  if (ccStr)   parts.push(`cc=${enc(ccStr)}`);
-  if (bccStr)  parts.push(`bcc=${enc(bccStr)}`);
+  if (body) parts.push(`body=${enc(body)}`);
+  if (ccStr) parts.push(`cc=${enc(ccStr)}`);
+  if (bccStr) parts.push(`bcc=${enc(bccStr)}`);
 
   return `mailto:${toStr}${parts.length ? "?" + parts.join("&") : ""}`;
 }
@@ -476,21 +507,21 @@ function mailtoUrl({ to, cc, bcc, subject, body }) {
 /* ───────────────── EMAIL UTILS — open in NEW TAB only ───────────────── */
 
 function _joinEmails(v) {
-  return Array.isArray(v) ? v.filter(Boolean).join(",") : (v || "");
+  return Array.isArray(v) ? v.filter(Boolean).join(",") : v || "";
 }
 
 /** Builder: usa il converter Gmail (mantiene CC/BCC) */
 function _gmailConverterUrl({ to, cc, bcc, subject, body }) {
-  const enc   = encodeURIComponent;
+  const enc = encodeURIComponent;
   const toStr = _joinEmails(to);
   const ccStr = _joinEmails(cc);
   const bccStr = _joinEmails(bcc);
 
   const q = [];
   if (subject) q.push(`subject=${enc(subject)}`);
-  if (body)    q.push(`body=${enc(body)}`);
-  if (ccStr)   q.push(`cc=${enc(ccStr)}`);
-  if (bccStr)  q.push(`bcc=${enc(bccStr)}`);
+  if (body) q.push(`body=${enc(body)}`);
+  if (ccStr) q.push(`cc=${enc(ccStr)}`);
+  if (bccStr) q.push(`bcc=${enc(bccStr)}`);
 
   const mailto = `mailto:${toStr}${q.length ? "?" + q.join("&") : ""}`;
   return `https://mail.google.com/mail/u/0/?extsrc=mailto&url=${enc(mailto)}`;
@@ -523,7 +554,9 @@ export const TCI_CLIENTI = [
 
 // normalizza stringhe per confronti robusti
 function norm(s) {
-  return String(s || "").trim().toUpperCase();
+  return String(s || "")
+    .trim()
+    .toUpperCase();
 }
 
 // true se il cliente è uno dei TCI
@@ -558,7 +591,8 @@ export function weekRangeLabel(weekKey) {
   monday.setUTCDate(simple.getUTCDate() - day + 1);
   const sunday = new Date(monday);
   sunday.setUTCDate(monday.getUTCDate() + 6);
-  const fmt = (D) => `${D.getUTCDate()}/${String(D.getUTCMonth() + 1).padStart(2, "0")}`;
+  const fmt = (D) =>
+    `${D.getUTCDate()}/${String(D.getUTCMonth() + 1).padStart(2, "0")}`;
   return `${fmt(monday)} – ${fmt(sunday)}`;
 }
 
@@ -567,11 +601,7 @@ export function weekRangeLabel(weekKey) {
 /* ────────────────────────────────────────────────────────────── */
 
 function tipoLabel(r) {
-  const raw =
-    r?.tipo_appuntamento ??
-    r?.tipoAppuntamento ??
-    r?.tipo ??
-    "";
+  const raw = r?.tipo_appuntamento ?? r?.tipoAppuntamento ?? r?.tipo ?? "";
 
   const k = String(raw)
     .normalize("NFKC")
@@ -582,17 +612,20 @@ function tipoLabel(r) {
     .toLowerCase();
 
   if (k === "sede" || k === "in sede") return "in sede";
-  if (k === "videocall" || k === "video call" || k === "video-call") return "in videocall";
+  if (k === "videocall" || k === "video call" || k === "video-call")
+    return "in videocall";
   return "";
 }
-
 
 /** normalizza un nome rimuovendo accenti, doppie spaziature e portando a lowercase */
 function normalizeName(s) {
   return String(s || "")
-    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^\p{L}\p{N}\s.']/gu, " ")
-    .replace(/\s+/g, " ").trim().toLowerCase();
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
 }
 
 /** genera alcune varianti utili per matching (nome cognome, solo cognome, iniziali, senza spazi) */
@@ -602,13 +635,17 @@ function nameVariants(fullName) {
   const parts = norm.split(" ");
   const name = parts[0] || "";
   const surname = parts[parts.length - 1] || "";
-  const initials = (name && surname) ? `${name[0]}.${surname}` : "";
-  return Array.from(new Set([
-    norm,                      // "mario rossi"
-    surname,                   // "rossi"
-    initials,                  // "m.rossi"
-    norm.replace(/\s+/g, ""),  // "mariorossi"
-  ].filter(Boolean)));
+  const initials = name && surname ? `${name[0]}.${surname}` : "";
+  return Array.from(
+    new Set(
+      [
+        norm, // "mario rossi"
+        surname, // "rossi"
+        initials, // "m.rossi"
+        norm.replace(/\s+/g, ""), // "mariorossi"
+      ].filter(Boolean),
+    ),
+  );
 }
 
 /** costruisce indice {variante -> email} a partire dal JSON Nome Cognome -> email */
@@ -646,11 +683,17 @@ function emailSentKey(type, id) {
 }
 function isEmailSent(type, id) {
   if (!id) return false;
-  try { return localStorage.getItem(emailSentKey(type, id)) === "1"; } catch { return false; }
+  try {
+    return localStorage.getItem(emailSentKey(type, id)) === "1";
+  } catch {
+    return false;
+  }
 }
 function markEmailSent(type, id) {
   if (!id) return;
-  try { localStorage.setItem(emailSentKey(type, id), "1"); } catch {}
+  try {
+    localStorage.setItem(emailSentKey(type, id), "1");
+  } catch {}
 }
 
 /* ────────────────────────────────────────────────────────────── */
@@ -679,7 +722,10 @@ function makeEmailAgente(r) {
   ].join("\n");
 
   // cliente speciale
-  const isTCI = String(r?.cliente || "").trim().toUpperCase() === "TCI PADOVA";
+  const isTCI =
+    String(r?.cliente || "")
+      .trim()
+      .toUpperCase() === "TCI PADOVA";
 
   // default
   let to = getAgentEmail(r) || "";
@@ -705,7 +751,6 @@ function makeEmailAgente(r) {
 
   return { to, cc, bcc, subject, body };
 }
-
 
 function makeEmailAzienda(r) {
   const dataGGMM = fmtDate(r?.data); // formato gg/mm/aaaa
@@ -741,7 +786,10 @@ function makeEmailAzienda(r) {
   let bcc = ["tlcoface@contaq.it"];
 
   // override per TCI PADOVA: cambia solo il CC
-  const isTCI = String(r?.cliente || "").trim().toUpperCase() === "TCI PADOVA";
+  const isTCI =
+    String(r?.cliente || "")
+      .trim()
+      .toUpperCase() === "TCI PADOVA";
   if (isTCI) {
     cc = [
       "andrea.fabiani@coface.it",
@@ -753,7 +801,6 @@ function makeEmailAzienda(r) {
 
   return { to, cc, bcc, subject, body };
 }
-
 
 // ✉️ Email ANNULLO (mantieni gg/mm/aaaa) — destinatario: agente; CC/BCC come email agente
 function makeEmailAnnullo(r) {
@@ -778,8 +825,8 @@ function makeEmailAnnullo(r) {
     `${r?.operatore || ""}`,
   ].join("\n");
 
-  const to  = getAgentEmail(r) || "";
-  const cc  = ["arturo.antacido@coface.com"];
+  const to = getAgentEmail(r) || "";
+  const cc = ["arturo.antacido@coface.com"];
   const bcc = ["tlcoface@contaq.it"];
 
   return { to, cc, bcc, subject, body };
@@ -805,7 +852,7 @@ function Editor({
 
   // stato "già inviato" (persistenza locale via localStorage)
   const sentAzienda = isEmailSent("azienda", r.id);
-  const sentAgente  = isEmailSent("agente",  r.id);
+  const sentAgente = isEmailSent("agente", r.id);
   const sentAnnullo = isEmailSent("annullo", r.id);
 
   const commonInputProps = (k) => ({
@@ -835,7 +882,8 @@ function Editor({
             <h3 className="font-semibold">Modifica appuntamento</h3>
           </div>
           <div className="text-xs text-gray-500">
-            ID: <span className="font-mono">{r.id}</span>{r.fatturato ? " • FATTURATO" : ""}
+            ID: <span className="font-mono">{r.id}</span>
+            {r.fatturato ? " • FATTURATO" : ""}
           </div>
         </div>
 
@@ -883,7 +931,7 @@ function Editor({
             <div>
               <Label className="text-xs">P.iva</Label>
               <Input {...commonInputProps("piva")} />
-            </div>  
+            </div>
             <div>
               <Label className="text-xs">Regione</Label>
               <Input {...commonInputProps("città")} />
@@ -923,25 +971,25 @@ function Editor({
             </div>
 
             <div>
-            <Label>Tipo appuntamento</Label>
-            <Select
-              value={r.tipo_appuntamento ?? ""}
-              onValueChange={(v) => {
-                // normalizza: 'in_sede' -> 'sede'
-                const norm = v === "in_sede" ? "sede" : v;
-                setEditing({ ...r, tipo_appuntamento: norm });
-                updateRow(r.id, { tipo_appuntamento: norm });
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Seleziona tipo appuntamento" />
-              </SelectTrigger>
-              <SelectContent>
-                {/* usa direttamente 'sede' come valore */}
-                <SelectItem value="sede">In sede</SelectItem>
-                <SelectItem value="videocall">Videocall</SelectItem>
-              </SelectContent>
-            </Select>
+              <Label>Tipo appuntamento</Label>
+              <Select
+                value={r.tipo_appuntamento ?? ""}
+                onValueChange={(v) => {
+                  // normalizza: 'in_sede' -> 'sede'
+                  const norm = v === "in_sede" ? "sede" : v;
+                  setEditing({ ...r, tipo_appuntamento: norm });
+                  updateRow(r.id, { tipo_appuntamento: norm });
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleziona tipo appuntamento" />
+                </SelectTrigger>
+                <SelectContent>
+                  {/* usa direttamente 'sede' come valore */}
+                  <SelectItem value="sede">In sede</SelectItem>
+                  <SelectItem value="videocall">Videocall</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="md:col-span-2">
@@ -1158,7 +1206,7 @@ function FiltersBar({
     setDayInsTo(today);
     setPage(1);
   };
-  
+
   const handleClearInsertionDates = () => {
     setDayInsFrom("");
     setDayInsTo("");
@@ -1253,7 +1301,7 @@ function FiltersBar({
           </Select>
         </div>
       </div>
-      
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
         <div className="col-span-2">
           <div className="flex items-end justify-between mb-1">
@@ -1288,7 +1336,7 @@ function FiltersBar({
             />
           </div>
         </div>
-        
+
         <div className="col-span-2">
           <div className="flex items-end justify-between mb-1">
             <Label>Inserimento</Label>
@@ -1332,7 +1380,7 @@ function FiltersBar({
             />
           </div>
         </div>
-        
+
         <div>
           <Label>Stato</Label>
           <Select
@@ -1401,19 +1449,35 @@ function ActionsBar({
         <FileSpreadsheet className="h-4 w-4" />
         Template
       </Button>
-      <Button variant="outline" className="gap-2" onClick={() => exportExcel(true)}>
+      <Button
+        variant="outline"
+        className="gap-2"
+        onClick={() => exportExcel(true)}
+      >
         <Download className="h-4 w-4" />
         Export (filtrato)
       </Button>
-      <Button variant="outline" className="gap-2" onClick={() => exportExcel(false)}>
+      <Button
+        variant="outline"
+        className="gap-2"
+        onClick={() => exportExcel(false)}
+      >
         <Download className="h-4 w-4" />
         Export (tutto)
       </Button>
-      <Button variant="outline" className="gap-2" onClick={exportCSVFatturazione}>
+      <Button
+        variant="outline"
+        className="gap-2"
+        onClick={exportCSVFatturazione}
+      >
         <Download className="h-4 w-4" />
         CSV Fatturazione
       </Button>
-      <Button variant="outline" className="gap-2" onClick={exportExcelFatturazione}>
+      <Button
+        variant="outline"
+        className="gap-2"
+        onClick={exportExcelFatturazione}
+      >
         <Download className="h-4 w-4" />
         Excel Fatturazione
       </Button>
@@ -1468,11 +1532,17 @@ function DonutCSS({ title, items }) {
     <div className="border rounded-xl p-3">
       <div className="text-sm font-medium mb-2">{title}</div>
       <div className="flex items-center gap-6">
-        <div className="w-40 h-40 rounded-full" style={{ background: gradient }} />
+        <div
+          className="w-40 h-40 rounded-full"
+          style={{ background: gradient }}
+        />
         <div className="text-sm space-y-2">
           {items.map((x, i) => (
             <div key={i} className="flex items-center gap-2">
-              <span className="inline-block w-3 h-3 rounded-sm" style={{ background: x.color }} />
+              <span
+                className="inline-block w-3 h-3 rounded-sm"
+                style={{ background: x.color }}
+              />
               <span className="w-28">{x.name}</span>
               <span className="font-medium">{x.value}</span>
             </div>
@@ -1490,11 +1560,20 @@ function OperatorStatsCard({ rowsAll, rowsFiltered, creators }) {
 
   const base = respectFilters ? rowsFiltered : rowsAll;
   const dataRows = React.useMemo(
-    () => (selectedOp === "tutti" ? base : base.filter((r) => r.operatore?.toLowerCase() === selectedOp)),
-    [base, selectedOp]
+    () =>
+      selectedOp === "tutti"
+        ? base
+        : base.filter((r) => r.operatore?.toLowerCase() === selectedOp),
+    [base, selectedOp],
   );
   const kpis = React.useMemo(() => {
-    const out = { tot: 0, programmato: 0, svolto: 0, annullato: 0, recuperato: 0 };
+    const out = {
+      tot: 0,
+      programmato: 0,
+      svolto: 0,
+      annullato: 0,
+      recuperato: 0,
+    };
     for (const r of dataRows) {
       out.tot++;
       if (out[r.stato] != null) out[r.stato]++;
@@ -1504,12 +1583,20 @@ function OperatorStatsCard({ rowsAll, rowsFiltered, creators }) {
     return out;
   }, [dataRows]);
   const byAppMonth = React.useMemo(
-    () => aggregateByMonth(dataRows, "data").map((x) => ({ label: x.month, value: x.count })),
-    [dataRows]
+    () =>
+      aggregateByMonth(dataRows, "data").map((x) => ({
+        label: x.month,
+        value: x.count,
+      })),
+    [dataRows],
   );
   const byInsMonth = React.useMemo(
-    () => aggregateByMonth(dataRows, "dataInserimento").map((x) => ({ label: x.month, value: x.count })),
-    [dataRows]
+    () =>
+      aggregateByMonth(dataRows, "dataInserimento").map((x) => ({
+        label: x.month,
+        value: x.count,
+      })),
+    [dataRows],
   );
   const byStatus = [
     { name: "Programmato", value: kpis.programmato, color: "#3b82f6" },
@@ -1589,13 +1676,14 @@ function OperatorLeaderboardProCard({ rows, monthTarget = 15 }) {
   const pad = (n) => String(n).padStart(2, "0");
   const now = new Date();
   const currentYM = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
-  const currentY  = `${now.getFullYear()}`;
+  const currentY = `${now.getFullYear()}`;
 
   // filtro periodo
   const rowsPeriod = React.useMemo(() => {
     const src = Array.isArray(rows) ? rows : [];
-    if (mode === "month") return src.filter(r => r.dataInserimento?.slice(0,7) === currentYM);
-    return src.filter(r => r.dataInserimento?.slice(0,4) === currentY);
+    if (mode === "month")
+      return src.filter((r) => r.dataInserimento?.slice(0, 7) === currentYM);
+    return src.filter((r) => r.dataInserimento?.slice(0, 4) === currentY);
   }, [rows, mode, currentYM, currentY]);
 
   // aggregazione per operatore
@@ -1608,7 +1696,9 @@ function OperatorLeaderboardProCard({ rows, monthTarget = 15 }) {
       if ((r.stato || "").toLowerCase() === "annullato") prev.cancelled += 1;
       map.set(key, prev);
     }
-    return Array.from(map.values()).sort((a, b) => b.count - a.count || a.op.localeCompare(b.op));
+    return Array.from(map.values()).sort(
+      (a, b) => b.count - a.count || a.op.localeCompare(b.op),
+    );
   }, [rowsPeriod]);
 
   const leader = aggregated[0]?.count || 0;
@@ -1616,17 +1706,32 @@ function OperatorLeaderboardProCard({ rows, monthTarget = 15 }) {
   const target = mode === "month" ? monthTarget : annualTarget;
 
   // util
-  const pct = (num, den) => (den > 0 ? Math.min(100, Math.round((num / den) * 100)) : 0);
-  const dispName = (s) => s.split(" ").map(x => x ? x[0].toUpperCase()+x.slice(1) : x).join(" ");
+  const pct = (num, den) =>
+    den > 0 ? Math.min(100, Math.round((num / den) * 100)) : 0;
+  const dispName = (s) =>
+    s
+      .split(" ")
+      .map((x) => (x ? x[0].toUpperCase() + x.slice(1) : x))
+      .join(" ");
 
   // selezione righe da mostrare
   const list = React.useMemo(() => {
-    const base = showAll ? aggregated.filter(x => x.count > 0) : aggregated.slice(0, 10);
+    const base = showAll
+      ? aggregated.filter((x) => x.count > 0)
+      : aggregated.slice(0, 10);
     return base.map((row, i) => {
-      const cancelRate = row.count ? Math.round((row.cancelled / row.count) * 100) : 0;
+      const cancelRate = row.count
+        ? Math.round((row.cancelled / row.count) * 100)
+        : 0;
       const progressLeader = pct(row.count, Math.max(1, leader));
       const progressTarget = pct(row.count, target);
-      return { ...row, rank: i + 1, cancelRate, progressLeader, progressTarget };
+      return {
+        ...row,
+        rank: i + 1,
+        cancelRate,
+        progressLeader,
+        progressTarget,
+      };
     });
   }, [aggregated, showAll, leader, target]);
 
@@ -1634,7 +1739,7 @@ function OperatorLeaderboardProCard({ rows, monthTarget = 15 }) {
   const summary = React.useMemo(() => {
     const tot = aggregated.reduce((s, x) => s + x.count, 0);
     const ann = aggregated.reduce((s, x) => s + x.cancelled, 0);
-    const avg = aggregated.length ? (tot / aggregated.length) : 0;
+    const avg = aggregated.length ? tot / aggregated.length : 0;
     return {
       tot,
       ann,
@@ -1650,38 +1755,56 @@ function OperatorLeaderboardProCard({ rows, monthTarget = 15 }) {
 
   // colore barra per % annullati
   const barClass = (rate) =>
-    rate >= 25 ? "bg-rose-500"
-    : rate >= 10 ? "bg-amber-500"
-    : "bg-emerald-600";
+    rate >= 25 ? "bg-rose-500" : rate >= 10 ? "bg-amber-500" : "bg-emerald-600";
 
   // riga operatore
   const BarRow = ({ row }) => {
-    const medal = row.rank === 1 ? "🥇" : row.rank === 2 ? "🥈" : row.rank === 3 ? "🥉" : `${row.rank}.`;
+    const medal =
+      row.rank === 1
+        ? "🥇"
+        : row.rank === 2
+          ? "🥈"
+          : row.rank === 3
+            ? "🥉"
+            : `${row.rank}.`;
     return (
       <div className="grid grid-cols-12 gap-3 items-center">
         {/* col 1–5: nome + medaglia */}
         <div className="col-span-12 md:col-span-5 min-w-0">
           <div className="flex items-center gap-2">
             <div className="w-8 text-center text-lg">{medal}</div>
-            <div className="font-medium truncate">{dispName(row.op)} {row.rank === 1 && <span>👑</span>}</div>
+            <div className="font-medium truncate">
+              {dispName(row.op)} {row.rank === 1 && <span>👑</span>}
+            </div>
           </div>
         </div>
 
         {/* col 6–10: barra orizzontale vs leader */}
         <div className="col-span-12 md:col-span-5">
-          <div className="h-3 bg-gray-200 rounded-full overflow-hidden" title={`${row.count} appuntamenti • ${row.cancelRate}% annullati`}>
-            <div className={`h-3 ${barClass(row.cancelRate)}`} style={{ width: `${row.progressLeader}%` }} />
+          <div
+            className="h-3 bg-gray-200 rounded-full overflow-hidden"
+            title={`${row.count} appuntamenti • ${row.cancelRate}% annullati`}
+          >
+            <div
+              className={`h-3 ${barClass(row.cancelRate)}`}
+              style={{ width: `${row.progressLeader}%` }}
+            />
           </div>
           <div className="flex justify-between text-[11px] text-gray-500 mt-1">
             <span>vs leader</span>
-            <span>{row.progressLeader}% • {leader - row.count > 0 ? `-${leader - row.count}` : "pari!"}</span>
+            <span>
+              {row.progressLeader}% •{" "}
+              {leader - row.count > 0 ? `-${leader - row.count}` : "pari!"}
+            </span>
           </div>
         </div>
 
         {/* col 11–12: numeri */}
         <div className="col-span-12 md:col-span-2 flex md:block justify-between md:justify-end text-sm">
           <div className="font-semibold">{row.count}</div>
-          <div className={`ml-4 md:ml-0 ${row.cancelRate>=25 ? "text-rose-600" : row.cancelRate>=10 ? "text-amber-600" : "text-emerald-600"}`}>
+          <div
+            className={`ml-4 md:ml-0 ${row.cancelRate >= 25 ? "text-rose-600" : row.cancelRate >= 10 ? "text-amber-600" : "text-emerald-600"}`}
+          >
             {row.cancelRate}%
           </div>
         </div>
@@ -1689,11 +1812,19 @@ function OperatorLeaderboardProCard({ rows, monthTarget = 15 }) {
         {/* barra “obiettivo” */}
         <div className="col-span-12">
           <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-            <div className="h-2 bg-sky-600" style={{ width: `${row.progressTarget}%` }} />
+            <div
+              className="h-2 bg-sky-600"
+              style={{ width: `${row.progressTarget}%` }}
+            />
           </div>
           <div className="flex justify-between text-[11px] text-gray-500 mt-1">
             <span>Obiettivo ({target})</span>
-            <span>{row.progressTarget}% • {row.count < target ? `${target - row.count} al target` : "target OK!"}</span>
+            <span>
+              {row.progressTarget}% •{" "}
+              {row.count < target
+                ? `${target - row.count} al target`
+                : "target OK!"}
+            </span>
           </div>
         </div>
 
@@ -1711,26 +1842,26 @@ function OperatorLeaderboardProCard({ rows, monthTarget = 15 }) {
             <div className="text-xs text-gray-500 mt-1">
               {mode === "month"
                 ? `Target: ${monthTarget} appuntamenti per operatore nel mese`
-                : `Target cumulativo: ${annualTarget} al ${pad(now.getMonth()+1)}/${now.getFullYear()}`}
+                : `Target cumulativo: ${annualTarget} al ${pad(now.getMonth() + 1)}/${now.getFullYear()}`}
             </div>
           </div>
 
           <div className="flex items-center gap-2">
             <button
-              className={`px-3 py-1 text-sm rounded-full border ${mode==="month" ? "bg-gray-900 text-white" : "bg-white"}`}
+              className={`px-3 py-1 text-sm rounded-full border ${mode === "month" ? "bg-gray-900 text-white" : "bg-white"}`}
               onClick={() => setMode("month")}
             >
               Mese
             </button>
             <button
-              className={`px-3 py-1 text-sm rounded-full border ${mode==="year" ? "bg-gray-900 text-white" : "bg-white"}`}
+              className={`px-3 py-1 text-sm rounded-full border ${mode === "year" ? "bg-gray-900 text-white" : "bg-white"}`}
               onClick={() => setMode("year")}
             >
               Anno
             </button>
             <button
               className="px-3 py-1 text-sm rounded-full border"
-              onClick={() => setShowAll(s => !s)}
+              onClick={() => setShowAll((s) => !s)}
               title="Mostra anche gli operatori con ≥1 appuntamento"
             >
               {showAll ? "Top 10" : "Mostra tutti"}
@@ -1741,7 +1872,9 @@ function OperatorLeaderboardProCard({ rows, monthTarget = 15 }) {
 
       <CardContent>
         {aggregated.length === 0 ? (
-          <div className="text-sm text-gray-500">Nessun inserimento nel periodo selezionato.</div>
+          <div className="text-sm text-gray-500">
+            Nessun inserimento nel periodo selezionato.
+          </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6">
             {/* elenco (bar chart orizzontale) */}
@@ -1750,11 +1883,15 @@ function OperatorLeaderboardProCard({ rows, monthTarget = 15 }) {
               <div className="hidden md:grid grid-cols-12 text-[11px] text-gray-500 px-1">
                 <span className="col-span-5">Operatore</span>
                 <span className="col-span-5">Barra vs leader</span>
-                <span className="col-span-2 text-right pr-2">Appt • % ann.</span>
+                <span className="col-span-2 text-right pr-2">
+                  Appt • % ann.
+                </span>
               </div>
 
               <div className="space-y-4">
-                {list.map((row) => (<BarRow key={row.op} row={row} />))}
+                {list.map((row) => (
+                  <BarRow key={row.op} row={row} />
+                ))}
               </div>
             </div>
 
@@ -1763,17 +1900,25 @@ function OperatorLeaderboardProCard({ rows, monthTarget = 15 }) {
               <div className="text-sm font-medium mb-2">Riepilogo</div>
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div className="rounded-lg border p-3">
-                  <div className="text-[11px] text-gray-500">Totale inserimenti</div>
+                  <div className="text-[11px] text-gray-500">
+                    Totale inserimenti
+                  </div>
                   <div className="text-lg font-semibold">{summary.tot}</div>
                 </div>
                 <div className="rounded-lg border p-3">
-                  <div className="text-[11px] text-gray-500">% annullati (globale)</div>
-                  <div className={`text-lg font-semibold ${summary.annRate>=25 ? "text-rose-600" : summary.annRate>=10 ? "text-amber-600" : "text-emerald-600"}`}>
+                  <div className="text-[11px] text-gray-500">
+                    % annullati (globale)
+                  </div>
+                  <div
+                    className={`text-lg font-semibold ${summary.annRate >= 25 ? "text-rose-600" : summary.annRate >= 10 ? "text-amber-600" : "text-emerald-600"}`}
+                  >
                     {summary.annRate}%
                   </div>
                 </div>
                 <div className="rounded-lg border p-3">
-                  <div className="text-[11px] text-gray-500">Media appt / operatore</div>
+                  <div className="text-[11px] text-gray-500">
+                    Media appt / operatore
+                  </div>
                   <div className="text-lg font-semibold">{summary.avg}</div>
                 </div>
                 <div className="rounded-lg border p-3">
@@ -1783,7 +1928,9 @@ function OperatorLeaderboardProCard({ rows, monthTarget = 15 }) {
               </div>
 
               <div className="mt-4 text-sm">
-                <div className="text-[11px] text-gray-500 mb-1">Legenda % annullati</div>
+                <div className="text-[11px] text-gray-500 mb-1">
+                  Legenda % annullati
+                </div>
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <span className="inline-block w-3 h-3 rounded-full bg-emerald-600" />
@@ -1801,7 +1948,8 @@ function OperatorLeaderboardProCard({ rows, monthTarget = 15 }) {
               </div>
 
               <div className="mt-4 text-[11px] text-gray-500">
-                Le barre principali misurano il progresso **vs leader**; la barra azzurra indica il **progresso verso il target**.
+                Le barre principali misurano il progresso **vs leader**; la
+                barra azzurra indica il **progresso verso il target**.
               </div>
             </div>
           </div>
@@ -1810,7 +1958,6 @@ function OperatorLeaderboardProCard({ rows, monthTarget = 15 }) {
     </Card>
   );
 }
-
 
 /* ────────────────────────────────────────────────────────────── */
 /* Statistiche per giorno di inserimento (ultimi 30 giorni)       */
@@ -1821,7 +1968,7 @@ function InsertionStatsCard({ rows }) {
       (rows || [])
         .map((r) => r.dataInserimento)
         .filter((d) => d && /^\d{4}-\d{2}-\d{2}$/.test(d))
-        .sort((a, b) => a.localeCompare(b))
+        .sort((a, b) => a.localeCompare(b)),
     );
     const arr = Array.from(set);
     return arr.slice(-30);
@@ -1843,7 +1990,8 @@ function InsertionStatsCard({ rows }) {
   const byOperatore = React.useMemo(() => {
     const map = new Map();
     for (const r of rows || []) {
-      if (!r.dataInserimento || !last30Dates.includes(r.dataInserimento)) continue;
+      if (!r.dataInserimento || !last30Dates.includes(r.dataInserimento))
+        continue;
       const key = (r.operatore || "—").toLowerCase();
       map.set(key, (map.get(key) || 0) + 1);
     }
@@ -1855,7 +2003,8 @@ function InsertionStatsCard({ rows }) {
   const byCliente = React.useMemo(() => {
     const map = new Map();
     for (const r of rows || []) {
-      if (!r.dataInserimento || !last30Dates.includes(r.dataInserimento)) continue;
+      if (!r.dataInserimento || !last30Dates.includes(r.dataInserimento))
+        continue;
       const key = r.cliente || "—";
       map.set(key, (map.get(key) || 0) + 1);
     }
@@ -1867,7 +2016,9 @@ function InsertionStatsCard({ rows }) {
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle>Statistiche per giorno di inserimento (ultimi 30 giorni presenti)</CardTitle>
+        <CardTitle>
+          Statistiche per giorno di inserimento (ultimi 30 giorni presenti)
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <BarChartCSS title="Totale per giorno (inserimento)" data={byDay} />
@@ -1879,7 +2030,10 @@ function InsertionStatsCard({ rows }) {
                 <div className="text-sm opacity-60">Nessun dato</div>
               ) : (
                 byOperatore.map((x) => (
-                  <div key={x.name} className="flex items-center justify-between text-sm">
+                  <div
+                    key={x.name}
+                    className="flex items-center justify-between text-sm"
+                  >
                     <span className="truncate">{x.name}</span>
                     <span className="font-medium">{x.count}</span>
                   </div>
@@ -1894,7 +2048,10 @@ function InsertionStatsCard({ rows }) {
                 <div className="text-sm opacity-60">Nessun dato</div>
               ) : (
                 byCliente.map((x) => (
-                  <div key={x.name} className="flex items-center justify-between text-sm">
+                  <div
+                    key={x.name}
+                    className="flex items-center justify-between text-sm"
+                  >
                     <span className="truncate">{x.name}</span>
                     <span className="font-medium">{x.count}</span>
                   </div>
@@ -1907,7 +2064,6 @@ function InsertionStatsCard({ rows }) {
     </Card>
   );
 }
-
 
 /* ────────────────────────────────────────────────────────────── */
 /* Wrapper a scomparsa riutilizzabile                             */
@@ -1943,7 +2099,7 @@ function Collapsible({ title, storageKey, defaultOpen = false, children }) {
     <div className="border rounded-xl overflow-hidden bg-white">
       <button
         type="button"
-        onClick={() => setOpen(o => !o)}
+        onClick={() => setOpen((o) => !o)}
         className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-gray-50"
       >
         <span className="font-medium">{title}</span>
@@ -1968,8 +2124,6 @@ function Collapsible({ title, storageKey, defaultOpen = false, children }) {
   );
 }
 
-
-
 /* ────────────────────────────────────────────────────────────── */
 /* Leaderboard Operatori (mese corrente)                          */
 /* ────────────────────────────────────────────────────────────── */
@@ -1984,8 +2138,11 @@ function OperatorLeaderboardCard({ rows, target = 15 }) {
 
   // filtra per mese corrente su dataInserimento
   const rowsThisMonth = React.useMemo(
-    () => rows.filter(r => r.dataInserimento && monthKey(r.dataInserimento) === currentYM),
-    [rows, currentYM]
+    () =>
+      rows.filter(
+        (r) => r.dataInserimento && monthKey(r.dataInserimento) === currentYM,
+      ),
+    [rows, currentYM],
   );
 
   // aggrega per operatore (case-insensitive)
@@ -2011,10 +2168,11 @@ function OperatorLeaderboardCard({ rows, target = 15 }) {
     if (count === 0) return "🌱 Si riparte!";
     if (leader - count <= 2) return "🏃 In rimonta!";
     return "💪 Avanti così!";
-    };
+  };
 
   // progress %
-  const pct = (num, den) => (den > 0 ? Math.min(100, Math.round((num / den) * 100)) : 0);
+  const pct = (num, den) =>
+    den > 0 ? Math.min(100, Math.round((num / den) * 100)) : 0;
 
   return (
     <Card>
@@ -2023,7 +2181,9 @@ function OperatorLeaderboardCard({ rows, target = 15 }) {
       </CardHeader>
       <CardContent className="space-y-4">
         {byOp.length === 0 ? (
-          <div className="text-sm text-gray-500">Nessun inserimento questo mese.</div>
+          <div className="text-sm text-gray-500">
+            Nessun inserimento questo mese.
+          </div>
         ) : (
           <div className="space-y-3">
             {byOp.slice(0, 8).map((row, i) => {
@@ -2034,14 +2194,18 @@ function OperatorLeaderboardCard({ rows, target = 15 }) {
               const gapTarget = Math.max(0, target - row.count);
 
               const medal =
-                rank === 1 ? "🥇" :
-                rank === 2 ? "🥈" :
-                rank === 3 ? "🥉" : `${rank}.`;
+                rank === 1
+                  ? "🥇"
+                  : rank === 2
+                    ? "🥈"
+                    : rank === 3
+                      ? "🥉"
+                      : `${rank}.`;
 
               // nome “pulito” con prima lettera maiuscola
               const displayName = row.op
                 .split(" ")
-                .map(s => s ? s[0].toUpperCase() + s.slice(1) : s)
+                .map((s) => (s ? s[0].toUpperCase() + s.slice(1) : s))
                 .join(" ");
 
               return (
@@ -2051,7 +2215,8 @@ function OperatorLeaderboardCard({ rows, target = 15 }) {
                       <div className="text-xl w-8 text-center">{medal}</div>
                       <div>
                         <div className="font-medium">
-                          {displayName} {rank === 1 && <span className="ml-1">👑</span>}
+                          {displayName}{" "}
+                          {rank === 1 && <span className="ml-1">👑</span>}
                         </div>
                         <div className="text-xs text-gray-500">
                           {funBadge(rank, row.count)}
@@ -2068,10 +2233,16 @@ function OperatorLeaderboardCard({ rows, target = 15 }) {
                   <div className="mt-3">
                     <div className="flex justify-between text-[11px] text-gray-500">
                       <span>Progress vs leader</span>
-                      <span>{towardsLeader}% {gapLeader ? `• manca ${gapLeader}` : "• pari!"}</span>
+                      <span>
+                        {towardsLeader}%{" "}
+                        {gapLeader ? `• manca ${gapLeader}` : "• pari!"}
+                      </span>
                     </div>
                     <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-                      <div className="h-full bg-gray-800" style={{ width: `${towardsLeader}%` }} />
+                      <div
+                        className="h-full bg-gray-800"
+                        style={{ width: `${towardsLeader}%` }}
+                      />
                     </div>
                   </div>
 
@@ -2079,10 +2250,18 @@ function OperatorLeaderboardCard({ rows, target = 15 }) {
                   <div className="mt-2">
                     <div className="flex justify-between text-[11px] text-gray-500">
                       <span>Obiettivo mese ({target})</span>
-                      <span>{towardsTarget}% {gapTarget ? `• ${gapTarget} al target` : "• target OK!"}</span>
+                      <span>
+                        {towardsTarget}%{" "}
+                        {gapTarget
+                          ? `• ${gapTarget} al target`
+                          : "• target OK!"}
+                      </span>
                     </div>
                     <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-                      <div className="h-full bg-green-500" style={{ width: `${towardsTarget}%` }} />
+                      <div
+                        className="h-full bg-green-500"
+                        style={{ width: `${towardsTarget}%` }}
+                      />
                     </div>
                   </div>
                 </div>
@@ -2116,9 +2295,18 @@ function CancellationStatsCard({
 
   // Selettori mese/anno
   const months = [
-    { v: 1, l: "Gen" }, { v: 2, l: "Feb" }, { v: 3, l: "Mar" }, { v: 4, l: "Apr" },
-    { v: 5, l: "Mag" }, { v: 6, l: "Giu" }, { v: 7, l: "Lug" }, { v: 8, l: "Ago" },
-    { v: 9, l: "Set" }, { v: 10, l: "Ott" }, { v: 11, l: "Nov" }, { v: 12, l: "Dic" },
+    { v: 1, l: "Gen" },
+    { v: 2, l: "Feb" },
+    { v: 3, l: "Mar" },
+    { v: 4, l: "Apr" },
+    { v: 5, l: "Mag" },
+    { v: 6, l: "Giu" },
+    { v: 7, l: "Lug" },
+    { v: 8, l: "Ago" },
+    { v: 9, l: "Set" },
+    { v: 10, l: "Ott" },
+    { v: 11, l: "Nov" },
+    { v: 12, l: "Dic" },
   ];
   const years = (() => {
     const y0 = new Date().getFullYear() - 3;
@@ -2136,128 +2324,192 @@ function CancellationStatsCard({
     return `${y}-${m}-${day}`;
   }
 
-function exportExcel() {
-  // ---- Foglio 1: RIEPILOGO per OPERATORE
-  const summaryAOA = [["Operatore","Inseriti mese","Annullati mese","% annulli mese"]];
-  for (const r of stats) {
-    summaryAOA.push([
-      r.operatore,
-      r.inseritiMese,
-      r.annullatiMese,
-      r.percAnnulli == null ? "" : (r.percAnnulli * 100).toFixed(1) + "%"
-    ]);
-  }
-  const wb = XLSX.utils.book_new();
-  const ws1 = XLSX.utils.aoa_to_sheet(summaryAOA);
-  XLSX.utils.book_append_sheet(wb, ws1, "Riepilogo Annulli");
-
-  // ---- Foglio 2: DETTAGLIO per OPERATORE
-  const header = [
-    "ID","Operatore","Data Inserimento","Data Appuntamento",
-    "Azienda","Luogo","Cliente","Agente","Tipo","Stato",
-    "Data Annullamento","Referente","Email","Telefono",
-    "Indirizzo","Provincia","ID Contaq","Note"
-  ];
-  const detailAOA = [header];
-  const byOp = new Map();
-  for (const r of detailRows) {
-    const op = r.operatore || "—";
-    if (!byOp.has(op)) byOp.set(op, []);
-    byOp.get(op).push(r);
-  }
-  const ops = Array.from(byOp.keys()).sort((a,b) => a.localeCompare(b, "it", { sensitivity:"base" }));
-  ops.forEach((op, idx) => {
-    if (idx > 0) detailAOA.push([]);
-    detailAOA.push([`Operatore: ${op}`]);
-    for (const r of byOp.get(op)) {
-      detailAOA.push([
-        r.id ?? "", r.operatore ?? "", fmtDate(r.dataInserimento), fmtDate(r.dataAppuntamento),
-        r.azienda ?? "", r.città || r.luogo || "", r.cliente ?? "", r.agente ?? "", r.tipo ?? "",
-        r.stato ?? "", fmtDate(r.dataAnnullamento), r.referente ?? "", r.email ?? "", r.telefono ?? "",
-        r.indirizzo ?? "", r.provincia ?? "", r.idContaq ?? "", r.note ?? ""
+  function exportExcel() {
+    // ---- Foglio 1: RIEPILOGO per OPERATORE
+    const summaryAOA = [
+      ["Operatore", "Inseriti mese", "Annullati mese", "% annulli mese"],
+    ];
+    for (const r of stats) {
+      summaryAOA.push([
+        r.operatore,
+        r.inseritiMese,
+        r.annullatiMese,
+        r.percAnnulli == null ? "" : (r.percAnnulli * 100).toFixed(1) + "%",
       ]);
     }
-  });
-  const ws2 = XLSX.utils.aoa_to_sheet(detailAOA);
-  XLSX.utils.book_append_sheet(wb, ws2, "Dettaglio Appuntamenti");
+    const wb = XLSX.utils.book_new();
+    const ws1 = XLSX.utils.aoa_to_sheet(summaryAOA);
+    XLSX.utils.book_append_sheet(wb, ws1, "Riepilogo Annulli");
 
-  // ---- Foglio 3: TOTALE PER CLIENTE
-  const byClientAOA = [["Cliente","Inseriti mese","Annullati mese","Buoni mese"]];
-  for (const r of byClient) {
-    byClientAOA.push([r.cliente, r.inseritiMese, r.annullatiMese, r.buoniMese]);
-  }
-  const ws3 = XLSX.utils.aoa_to_sheet(byClientAOA);
-  XLSX.utils.book_append_sheet(wb, ws3, "Totale per cliente");
+    // ---- Foglio 2: DETTAGLIO per OPERATORE
+    const header = [
+      "ID",
+      "Operatore",
+      "Data Inserimento",
+      "Data Appuntamento",
+      "Azienda",
+      "Luogo",
+      "Cliente",
+      "Agente",
+      "Tipo",
+      "Stato",
+      "Data Annullamento",
+      "Referente",
+      "Email",
+      "Telefono",
+      "Indirizzo",
+      "Provincia",
+      "ID Contaq",
+      "Note",
+    ];
+    const detailAOA = [header];
+    const byOp = new Map();
+    for (const r of detailRows) {
+      const op = r.operatore || "—";
+      if (!byOp.has(op)) byOp.set(op, []);
+      byOp.get(op).push(r);
+    }
+    const ops = Array.from(byOp.keys()).sort((a, b) =>
+      a.localeCompare(b, "it", { sensitivity: "base" }),
+    );
+    ops.forEach((op, idx) => {
+      if (idx > 0) detailAOA.push([]);
+      detailAOA.push([`Operatore: ${op}`]);
+      for (const r of byOp.get(op)) {
+        detailAOA.push([
+          r.id ?? "",
+          r.operatore ?? "",
+          fmtDate(r.dataInserimento),
+          fmtDate(r.dataAppuntamento),
+          r.azienda ?? "",
+          r.città || r.luogo || "",
+          r.cliente ?? "",
+          r.agente ?? "",
+          r.tipo ?? "",
+          r.stato ?? "",
+          fmtDate(r.dataAnnullamento),
+          r.referente ?? "",
+          r.email ?? "",
+          r.telefono ?? "",
+          r.indirizzo ?? "",
+          r.provincia ?? "",
+          r.idContaq ?? "",
+          r.note ?? "",
+        ]);
+      }
+    });
+    const ws2 = XLSX.utils.aoa_to_sheet(detailAOA);
+    XLSX.utils.book_append_sheet(wb, ws2, "Dettaglio Appuntamenti");
 
-  // ---- Foglio 4: DETTAGLIO per CLIENTE (Inseriti/Annullati del mese)
-  const ymOf = (d) => {
-    if (!d) return "";
-    const dd = d instanceof Date ? d : new Date(d);
-    if (Number.isNaN(dd.getTime())) return "";
-    return `${dd.getFullYear()}-${String(dd.getMonth()+1).padStart(2,"0")}`;
-  };
-  const ym = `${annYear}-${String(annMonth).padStart(2,"0")}`;
-  const tagNelMese = (r) => {
-    const isIns = ymOf(r.dataInserimento) === ym;
-    const isAnn = (r.stato || "").toLowerCase() === "annullato" && ymOf(r.dataAnnullamento) === ym;
-    if (isAnn) return "Annullato";
-    if (isIns) return "Inserito";
-    return ""; // in teoria non dovrebbe capitare, ma teniamolo safe
-  };
-
-  const byCli = new Map();
-  for (const r of detailRows) {
-    const cli = r.cliente || "—";
-    if (!byCli.has(cli)) byCli.set(cli, []);
-    byCli.get(cli).push(r);
-  }
-
-  const detailByClientAOA = [[
-    "Nel mese","ID","Cliente","Operatore","Data Inserimento","Data Appuntamento",
-    "Azienda","Luogo","Agente","Tipo","Stato","Data Annullamento",
-    "Referente","Email","Telefono","Indirizzo","Provincia","ID Contaq","Note"
-  ]];
-
-  const clients = Array.from(byCli.keys()).sort((a,b) => a.localeCompare(b, "it", { sensitivity:"base" }));
-  clients.forEach((cli, idx) => {
-    if (idx > 0) detailByClientAOA.push([]);
-    detailByClientAOA.push([`Cliente: ${cli}`]);
-    for (const r of byCli.get(cli)) {
-      detailByClientAOA.push([
-        tagNelMese(r),
-        r.id ?? "",
-        r.cliente ?? "",
-        r.operatore ?? "",
-        fmtDate(r.dataInserimento),
-        fmtDate(r.dataAppuntamento),
-        r.azienda ?? "",
-        r.città || r.luogo || "",
-        r.agente ?? "",
-        r.tipo ?? "",
-        r.stato ?? "",
-        fmtDate(r.dataAnnullamento),
-        r.referente ?? "",
-        r.email ?? "",
-        r.telefono ?? "",
-        r.indirizzo ?? "",
-        r.provincia ?? "",
-        r.idContaq ?? "",
-        r.note ?? "",
+    // ---- Foglio 3: TOTALE PER CLIENTE
+    const byClientAOA = [
+      ["Cliente", "Inseriti mese", "Annullati mese", "Buoni mese"],
+    ];
+    for (const r of byClient) {
+      byClientAOA.push([
+        r.cliente,
+        r.inseritiMese,
+        r.annullatiMese,
+        r.buoniMese,
       ]);
     }
-  });
-  const ws4 = XLSX.utils.aoa_to_sheet(detailByClientAOA);
-  XLSX.utils.book_append_sheet(wb, ws4, "Dettaglio per cliente");
+    const ws3 = XLSX.utils.aoa_to_sheet(byClientAOA);
+    XLSX.utils.book_append_sheet(wb, ws3, "Totale per cliente");
 
-  const fname = `annulli_${annYear}-${String(annMonth).padStart(2,"0")}.xlsx`;
-  XLSX.writeFile(wb, fname);
-}
+    // ---- Foglio 4: DETTAGLIO per CLIENTE (Inseriti/Annullati del mese)
+    const ymOf = (d) => {
+      if (!d) return "";
+      const dd = d instanceof Date ? d : new Date(d);
+      if (Number.isNaN(dd.getTime())) return "";
+      return `${dd.getFullYear()}-${String(dd.getMonth() + 1).padStart(2, "0")}`;
+    };
+    const ym = `${annYear}-${String(annMonth).padStart(2, "0")}`;
+    const tagNelMese = (r) => {
+      const isIns = ymOf(r.dataInserimento) === ym;
+      const isAnn =
+        (r.stato || "").toLowerCase() === "annullato" &&
+        ymOf(r.dataAnnullamento) === ym;
+      if (isAnn) return "Annullato";
+      if (isIns) return "Inserito";
+      return ""; // in teoria non dovrebbe capitare, ma teniamolo safe
+    };
+
+    const byCli = new Map();
+    for (const r of detailRows) {
+      const cli = r.cliente || "—";
+      if (!byCli.has(cli)) byCli.set(cli, []);
+      byCli.get(cli).push(r);
+    }
+
+    const detailByClientAOA = [
+      [
+        "Nel mese",
+        "ID",
+        "Cliente",
+        "Operatore",
+        "Data Inserimento",
+        "Data Appuntamento",
+        "Azienda",
+        "Luogo",
+        "Agente",
+        "Tipo",
+        "Stato",
+        "Data Annullamento",
+        "Referente",
+        "Email",
+        "Telefono",
+        "Indirizzo",
+        "Provincia",
+        "ID Contaq",
+        "Note",
+      ],
+    ];
+
+    const clients = Array.from(byCli.keys()).sort((a, b) =>
+      a.localeCompare(b, "it", { sensitivity: "base" }),
+    );
+    clients.forEach((cli, idx) => {
+      if (idx > 0) detailByClientAOA.push([]);
+      detailByClientAOA.push([`Cliente: ${cli}`]);
+      for (const r of byCli.get(cli)) {
+        detailByClientAOA.push([
+          tagNelMese(r),
+          r.id ?? "",
+          r.cliente ?? "",
+          r.operatore ?? "",
+          fmtDate(r.dataInserimento),
+          fmtDate(r.dataAppuntamento),
+          r.azienda ?? "",
+          r.città || r.luogo || "",
+          r.agente ?? "",
+          r.tipo ?? "",
+          r.stato ?? "",
+          fmtDate(r.dataAnnullamento),
+          r.referente ?? "",
+          r.email ?? "",
+          r.telefono ?? "",
+          r.indirizzo ?? "",
+          r.provincia ?? "",
+          r.idContaq ?? "",
+          r.note ?? "",
+        ]);
+      }
+    });
+    const ws4 = XLSX.utils.aoa_to_sheet(detailByClientAOA);
+    XLSX.utils.book_append_sheet(wb, ws4, "Dettaglio per cliente");
+
+    const fname = `annulli_${annYear}-${String(annMonth).padStart(2, "0")}.xlsx`;
+    XLSX.writeFile(wb, fname);
+  }
 
   // ------------------- RENDER -------------------
   return (
     <Card>
       <div className="flex items-center gap-2">
-        <Select value={String(annMonth)} onValueChange={(v) => setAnnMonth(Number(v))}>
+        <Select
+          value={String(annMonth)}
+          onValueChange={(v) => setAnnMonth(Number(v))}
+        >
           <SelectTrigger className="w-[110px]">
             <SelectValue placeholder="Mese" />
           </SelectTrigger>
@@ -2270,7 +2522,10 @@ function exportExcel() {
           </SelectContent>
         </Select>
 
-        <Select value={String(annYear)} onValueChange={(v) => setAnnYear(Number(v))}>
+        <Select
+          value={String(annYear)}
+          onValueChange={(v) => setAnnYear(Number(v))}
+        >
           <SelectTrigger className="w-[110px]">
             <SelectValue placeholder="Anno" />
           </SelectTrigger>
@@ -2302,20 +2557,30 @@ function exportExcel() {
             </thead>
             <tbody>
               {stats.map((r) => {
-                const pct = r.percAnnulli == null ? "—" : (r.percAnnulli * 100).toFixed(1) + "%";
+                const pct =
+                  r.percAnnulli == null
+                    ? "—"
+                    : (r.percAnnulli * 100).toFixed(1) + "%";
                 const warn = r.percAnnulli != null && r.percAnnulli > 1;
                 return (
                   <tr key={r.operatore} className="border-b last:border-0">
                     <td className="py-2 pr-3">{r.operatore}</td>
                     <td className="py-2 pr-3">{r.inseritiMese}</td>
                     <td className="py-2 pr-3">{r.annullatiMese}</td>
-                    <td className={`py-2 pr-3 ${warn ? "text-red-600 font-medium" : ""}`}>{pct}</td>
+                    <td
+                      className={`py-2 pr-3 ${warn ? "text-red-600 font-medium" : ""}`}
+                    >
+                      {pct}
+                    </td>
                   </tr>
                 );
               })}
               {stats.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="py-4 text-center text-muted-foreground">
+                  <td
+                    colSpan={4}
+                    className="py-4 text-center text-muted-foreground"
+                  >
                     Nessun dato per il mese selezionato
                   </td>
                 </tr>
@@ -2326,7 +2591,9 @@ function exportExcel() {
 
         {/* Tabella per Cliente */}
         <div className="mt-6">
-          <div className="text-sm font-medium mb-2">Totali per cliente (mese selezionato)</div>
+          <div className="text-sm font-medium mb-2">
+            Totali per cliente (mese selezionato)
+          </div>
           <div className="overflow-auto">
             <table className="min-w-full text-sm">
               <thead>
@@ -2348,7 +2615,10 @@ function exportExcel() {
                 ))}
                 {byClient.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="py-4 text-center text-muted-foreground">
+                    <td
+                      colSpan={4}
+                      className="py-4 text-center text-muted-foreground"
+                    >
                       Nessun dato per il mese selezionato
                     </td>
                   </tr>
@@ -2359,86 +2629,91 @@ function exportExcel() {
         </div>
 
         <p className="text-xs text-muted-foreground mt-2">
-          La metrica è: annullati con <em>data annullamento</em> nel mese / inseriti con <em>data inserimento</em> nel mese.
+          La metrica è: annullati con <em>data annullamento</em> nel mese /
+          inseriti con <em>data inserimento</em> nel mese.
           <br />
-          Il dettaglio include tutti gli appuntamenti inseriti-nel-mese o annullati-nel-mese, raggruppati per operatore.
+          Il dettaglio include tutti gli appuntamenti inseriti-nel-mese o
+          annullati-nel-mese, raggruppati per operatore.
         </p>
       </div>
     </Card>
   );
 }
 
-    function TodayByClientCard({ data }) {
-        const { rows, totals } = data;
+function TodayByClientCard({ data }) {
+  const { rows, totals } = data;
 
-        return (
-            <Card>
-                <div className="p-4 flex items-center justify-between">
-                    <div className="font-semibold text-lg">Oggi per cliente</div>
-                    <div className="text-sm text-muted-foreground">
-                        Totale oggi: <span className="font-medium">{totals.totale}</span>
-                    </div>
-                </div>
+  return (
+    <Card>
+      <div className="p-4 flex items-center justify-between">
+        <div className="font-semibold text-lg">Oggi per cliente</div>
+        <div className="text-sm text-muted-foreground">
+          Totale oggi: <span className="font-medium">{totals.totale}</span>
+        </div>
+      </div>
 
-                <div className="px-4 pb-4">
-                    <div className="overflow-auto">
-                        <table className="min-w-full text-sm">
-                            <thead>
-                                <tr className="text-left border-b">
-                                    <th className="py-2 pr-3">Cliente</th>
-                                    <th className="py-2 pr-3">Programm.</th>
-                                    <th className="py-2 pr-3">Svolti</th>
-                                    <th className="py-2 pr-3">Annullati</th>
-                                    <th className="py-2 pr-3">Recuperati</th>
-                                    <th className="py-2 pr-3">Totale</th>
-                                </tr>
-                            </thead>
+      <div className="px-4 pb-4">
+        <div className="overflow-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="text-left border-b">
+                <th className="py-2 pr-3">Cliente</th>
+                <th className="py-2 pr-3">Programm.</th>
+                <th className="py-2 pr-3">Svolti</th>
+                <th className="py-2 pr-3">Annullati</th>
+                <th className="py-2 pr-3">Recuperati</th>
+                <th className="py-2 pr-3">Totale</th>
+              </tr>
+            </thead>
 
-                            <tbody>
-                                {rows.map(r => (
-                                    <tr key={r.cliente} className="border-b last:border-0">
-                                        <td className="py-2 pr-3">{r.cliente}</td>
-                                        <td className="py-2 pr-3">{r.programmati}</td>
-                                        <td className="py-2 pr-3">{r.svolti}</td>
-                                        <td className="py-2 pr-3">{r.annullati}</td>
-                                        <td className="py-2 pr-3">{r.recuperati}</td>
-                                        <td className="py-2 pr-3 font-medium">{r.totale}</td>
-                                    </tr>
-                                ))}
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.cliente} className="border-b last:border-0">
+                  <td className="py-2 pr-3">{r.cliente}</td>
+                  <td className="py-2 pr-3">{r.programmati}</td>
+                  <td className="py-2 pr-3">{r.svolti}</td>
+                  <td className="py-2 pr-3">{r.annullati}</td>
+                  <td className="py-2 pr-3">{r.recuperati}</td>
+                  <td className="py-2 pr-3 font-medium">{r.totale}</td>
+                </tr>
+              ))}
 
-                                {rows.length === 0 && (
-                                    <tr>
-                                        <td colSpan={6} className="py-4 text-center text-muted-foreground">
-                                            Nessun appuntamento per oggi
-                                        </td>
-                                    </tr>
-                                )}
-                            </tbody>
+              {rows.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={6}
+                    className="py-4 text-center text-muted-foreground"
+                  >
+                    Nessun appuntamento per oggi
+                  </td>
+                </tr>
+              )}
+            </tbody>
 
-                            {rows.length > 0 && (
-                                <tfoot>
-                                    <tr className="border-t">
-                                        <td className="py-2 pr-3 font-medium">Totale</td>
-                                        <td className="py-2 pr-3">{totals.programmati}</td>
-                                        <td className="py-2 pr-3">{totals.svolti}</td>
-                                        <td className="py-2 pr-3">{totals.annullati}</td>
-                                        <td className="py-2 pr-3">{totals.recuperati}</td>
-                                        <td className="py-2 pr-3 font-semibold">{totals.totale}</td>
-                                    </tr>
-                                </tfoot>
-                            )}
-                        </table>
-                    </div>
+            {rows.length > 0 && (
+              <tfoot>
+                <tr className="border-t">
+                  <td className="py-2 pr-3 font-medium">Totale</td>
+                  <td className="py-2 pr-3">{totals.programmati}</td>
+                  <td className="py-2 pr-3">{totals.svolti}</td>
+                  <td className="py-2 pr-3">{totals.annullati}</td>
+                  <td className="py-2 pr-3">{totals.recuperati}</td>
+                  <td className="py-2 pr-3 font-semibold">{totals.totale}</td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
 
-                    <p className="text-xs text-muted-foreground mt-2">
-                        Suddivisione per <em>cliente</em> degli appuntamenti con <em>data appuntamento</em> uguale ad oggi,
-                        rispettando i filtri di contesto.
-                    </p>
-                </div>
-            </Card>
-        );
-    }
-
+        <p className="text-xs text-muted-foreground mt-2">
+          Suddivisione per <em>cliente</em> degli appuntamenti con{" "}
+          <em>data appuntamento</em> uguale ad oggi, rispettando i filtri di
+          contesto.
+        </p>
+      </div>
+    </Card>
+  );
+}
 
 function TciWeeklyCapacityCard({ rows, target = 4 }) {
   const tciWeekly = useMemo(() => {
@@ -2446,10 +2721,23 @@ function TciWeeklyCapacityCard({ rows, target = 4 }) {
     // cliente -> (mondayKey -> { count, label })
     const map = new Map();
 
-    const norm = (s) => String(s || "").trim().toUpperCase();
+    const norm = (s) =>
+      String(s || "")
+        .trim()
+        .toUpperCase();
     const mesi = [
-      "gennaio","febbraio","marzo","aprile","maggio","giugno",
-      "luglio","agosto","settembre","ottobre","novembre","dicembre"
+      "gennaio",
+      "febbraio",
+      "marzo",
+      "aprile",
+      "maggio",
+      "giugno",
+      "luglio",
+      "agosto",
+      "settembre",
+      "ottobre",
+      "novembre",
+      "dicembre",
     ];
 
     // Ritorna { key: 'YYYY-MM-DD' del lunedì, label: '3–7 novembre' }
@@ -2457,7 +2745,7 @@ function TciWeeklyCapacityCard({ rows, target = 4 }) {
       const dt = d instanceof Date ? d : new Date(d);
       if (Number.isNaN(dt.getTime())) return null;
 
-      const day = dt.getDay() || 7;           // domenica=7
+      const day = dt.getDay() || 7; // domenica=7
       const monday = new Date(dt);
       monday.setHours(0, 0, 0, 0);
       monday.setDate(dt.getDate() - (day - 1));
@@ -2499,7 +2787,8 @@ function TciWeeklyCapacityCard({ rows, target = 4 }) {
     for (const cli of TCI_CLIENTI) {
       if (!map.has(cli)) map.set(cli, new Map());
       const inner = map.get(cli);
-      if (!inner.has(cur.key)) inner.set(cur.key, { count: 0, label: cur.label });
+      if (!inner.has(cur.key))
+        inner.set(cur.key, { count: 0, label: cur.label });
     }
 
     return map; // Map<string, Map<string, {count, label}>>
@@ -2508,11 +2797,13 @@ function TciWeeklyCapacityCard({ rows, target = 4 }) {
   // Preparo righe UI ordinate per cliente + settimana (cronologica)
   const rowsUi = [];
   for (const [client, weeks] of tciWeekly.entries()) {
-    const ordered = Array.from(weeks.entries()).sort((a, b) => a[0].localeCompare(b[0])); // sort su mondayKey
+    const ordered = Array.from(weeks.entries()).sort((a, b) =>
+      a[0].localeCompare(b[0]),
+    ); // sort su mondayKey
     for (const [, v] of ordered) {
       const count = v.count;
       const label = v.label;
-      let cls = "text-amber-600";          // sotto target
+      let cls = "text-amber-600"; // sotto target
       if (count === target) cls = "text-green-600";
       if (count > target) cls = "text-red-600 font-medium";
       rowsUi.push({ client, label, count, cls });
@@ -2524,7 +2815,8 @@ function TciWeeklyCapacityCard({ rows, target = 4 }) {
       <div className="p-4">
         <div className="font-semibold mb-2">Capacità settimanale TCI</div>
         <div className="text-sm text-muted-foreground mb-3">
-          Target massimo per settimana: <span className="font-medium">{target}</span>
+          Target massimo per settimana:{" "}
+          <span className="font-medium">{target}</span>
         </div>
 
         <div className="overflow-auto">
@@ -2545,7 +2837,10 @@ function TciWeeklyCapacityCard({ rows, target = 4 }) {
                   <React.Fragment key={`${r.client}-${r.label}`}>
                     {newGroup && (
                       <tr className="bg-gray-100">
-                        <td colSpan={3} className="py-1 pl-2 font-semibold text-gray-700 border-t">
+                        <td
+                          colSpan={3}
+                          className="py-1 pl-2 font-semibold text-gray-700 border-t"
+                        >
                           {r.client}
                         </td>
                       </tr>
@@ -2563,7 +2858,10 @@ function TciWeeklyCapacityCard({ rows, target = 4 }) {
 
               {rowsUi.length === 0 && (
                 <tr>
-                  <td colSpan={3} className="py-4 text-center text-muted-foreground">
+                  <td
+                    colSpan={3}
+                    className="py-4 text-center text-muted-foreground"
+                  >
                     Nessun appuntamento TCI nel periodo visibile.
                   </td>
                 </tr>
@@ -2573,17 +2871,15 @@ function TciWeeklyCapacityCard({ rows, target = 4 }) {
         </div>
 
         <p className="text-xs text-muted-foreground mt-2">
-          Conteggio per <em>data appuntamento</em>, raggruppato per settimana (lun–ven).{" "}
-          Colori: <span className="text-amber-600">giallo</span> &lt; target,{" "}
-          <span className="text-green-600">verde</span> = target,{" "}
+          Conteggio per <em>data appuntamento</em>, raggruppato per settimana
+          (lun–ven). Colori: <span className="text-amber-600">giallo</span> &lt;
+          target, <span className="text-green-600">verde</span> = target,{" "}
           <span className="text-red-600">rosso</span> &gt; target.
         </p>
       </div>
     </Card>
   );
 }
-
-
 
 /* ────────────────────────────────────────────────────────────── */
 /* Componente principale                                          */
@@ -2652,9 +2948,6 @@ export default function CofaceAppuntamentiDashboard() {
   // ✅ Prefill stabile per evitare loop con initialValues vuoto
   const emptyDefaults = React.useMemo(() => ({}), []);
 
-
-  
-
   // Primo fetch (pubblico) + realtime
   useEffect(() => {
     let mounted = true;
@@ -2662,25 +2955,27 @@ export default function CofaceAppuntamentiDashboard() {
     // 1) Primo fetch: TUTTO lo storico (nessun filtro)
     const refresh = async () => {
       try {
-      const { data, error } = await supabase
-        .from("appointments")
-        .select("*")
-        .order("dataInserimento", { ascending: false })   // più recenti prima
-        .order("oraInserimento",  { ascending: false })   // più recenti prima
-        .range(0, 1999);                                  // prendi fino a 2000 righe
+        const { data, error } = await supabase
+          .from("appointments")
+          .select("*")
+          .order("dataInserimento", { ascending: false }) // più recenti prima
+          .order("oraInserimento", { ascending: false }) // più recenti prima
+          .range(0, 1999); // prendi fino a 2000 righe
 
         // DEBUG: rimuovi quando hai finito
         console.log(
           "FETCH rows:",
           data?.length,
           "esempi:",
-          (data || []).slice(0, 5).map((r) => r.id)
+          (data || []).slice(0, 5).map((r) => r.id),
         );
 
         if (!mounted) return;
         if (error != null && (error.message || error.code)) {
           console.error("Select error:", error);
-          alert("Errore lettura appuntamenti: " + (error.message || error.code));
+          alert(
+            "Errore lettura appuntamenti: " + (error.message || error.code),
+          );
           return;
         }
         setRows((data ?? []).map(rowFromDb));
@@ -2707,7 +3002,9 @@ export default function CofaceAppuntamentiDashboard() {
             if (payload.eventType === "UPDATE") {
               const r = rowFromDb(payload.new);
               const exists = prev.some((x) => x.id === r.id);
-              return exists ? prev.map((x) => (x.id === r.id ? r : x)) : [r, ...prev];
+              return exists
+                ? prev.map((x) => (x.id === r.id ? r : x))
+                : [r, ...prev];
             }
             if (payload.eventType === "DELETE") {
               const id = payload.old?.id;
@@ -2715,7 +3012,7 @@ export default function CofaceAppuntamentiDashboard() {
             }
             return prev;
           });
-        }
+        },
       )
       .subscribe();
 
@@ -2727,7 +3024,9 @@ export default function CofaceAppuntamentiDashboard() {
 
     return () => {
       mounted = false;
-      try { supabase.removeChannel(ch); } catch {}
+      try {
+        supabase.removeChannel(ch);
+      } catch {}
       document.removeEventListener("visibilitychange", onVis);
     };
   }, []);
@@ -2761,26 +3060,46 @@ export default function CofaceAppuntamentiDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows]);
 
-/* liste dinamiche */
-const agents = useMemo(() => {
-  const set = new Set();
+  /* liste dinamiche */
+  const agents = useMemo(() => {
+    const set = new Set();
 
-  rows.forEach((r) => {
-    const norm = normalizeAgentName(r.agente);
-    if (norm) set.add(norm);
-  });
+    rows.forEach((r) => {
+      const norm = normalizeAgentName(r.agente);
+      if (norm) set.add(norm);
+    });
 
-  return ["tutti", ...Array.from(set).sort((a, b) => a.localeCompare(b, "it"))];
-}, [rows]);
-
+    return [
+      "tutti",
+      ...Array.from(set).sort((a, b) => a.localeCompare(b, "it")),
+    ];
+  }, [rows]);
 
   const creators = useMemo(
-    () => ["tutti", ...Array.from(new Set(rows.map((r) => r.operatore).filter(Boolean).map(s => s.toLowerCase()))).sort((a, b) => a.localeCompare(b))],
-    [rows]
+    () => [
+      "tutti",
+      ...Array.from(
+        new Set(
+          rows
+            .map((r) => r.operatore)
+            .filter(Boolean)
+            .map((s) => s.toLowerCase()),
+        ),
+      ).sort((a, b) => a.localeCompare(b)),
+    ],
+    [rows],
   );
   const clients = useMemo(
-    () => ["tutti", ...Array.from(new Set([...CLIENTI_CANONICI, ...rows.map((r) => r.cliente).filter(Boolean)]))],
-    [rows]
+    () => [
+      "tutti",
+      ...Array.from(
+        new Set([
+          ...CLIENTI_CANONICI,
+          ...rows.map((r) => r.cliente).filter(Boolean),
+        ]),
+      ),
+    ],
+    [rows],
   );
 
   /* filtra + ordina */
@@ -2789,284 +3108,394 @@ const agents = useMemo(() => {
     if (agent !== "tutti") {
       const key = normalizeAgentName(agent);
       out = out.filter((r) => normalizeAgentName(r.agente) === key);
-    }  
-    if (creator !== "tutti") out = out.filter((r) => r.operatore?.toLowerCase() === creator);
+    }
+    if (creator !== "tutti")
+      out = out.filter((r) => r.operatore?.toLowerCase() === creator);
     if (client !== "tutti") out = out.filter((r) => r.cliente === client);
     if (status !== "tutti") out = out.filter((r) => r.stato === status);
     if (dayAppFrom) out = out.filter((r) => r.data >= dayAppFrom);
     if (dayAppTo) out = out.filter((r) => r.data <= dayAppTo);
     if (dayInsFrom) out = out.filter((r) => r.dataInserimento >= dayInsFrom);
     if (dayInsTo) out = out.filter((r) => r.dataInserimento <= dayInsTo);
-    
+
     if (q.trim()) {
       const n = q.trim().toLowerCase();
       out = out.filter((r) =>
         [
-          r.azienda, r.referente, r.email, r.telefono, r.piva, r.città, r.indirizzo,
-          r.provincia, r.agente, r.operatore, r.cliente, r.idContaq, r.note,
+          r.azienda,
+          r.referente,
+          r.email,
+          r.telefono,
+          r.piva,
+          r.città,
+          r.indirizzo,
+          r.provincia,
+          r.agente,
+          r.operatore,
+          r.cliente,
+          r.idContaq,
+          r.note,
         ]
           .filter(Boolean)
-          .some((v) => String(v).toLowerCase().includes(n))
+          .some((v) => String(v).toLowerCase().includes(n)),
       );
     }
     return out.sort((a, b) => {
-      const aKey = sortBy === "inserimento" ? tsFrom(a.dataInserimento, a.oraInserimento) : tsFrom(a.data, a.ora);
-      const bKey = sortBy === "inserimento" ? tsFrom(b.dataInserimento, b.oraInserimento) : tsFrom(b.data, b.ora);
-      const aNa = Number.isNaN(aKey), bNa = Number.isNaN(bKey);
+      const aKey =
+        sortBy === "inserimento"
+          ? tsFrom(a.dataInserimento, a.oraInserimento)
+          : tsFrom(a.data, a.ora);
+      const bKey =
+        sortBy === "inserimento"
+          ? tsFrom(b.dataInserimento, b.oraInserimento)
+          : tsFrom(b.data, b.ora);
+      const aNa = Number.isNaN(aKey),
+        bNa = Number.isNaN(bKey);
       if (aNa && bNa) return 0;
       if (aNa) return sortDir === "asc" ? 1 : -1;
       if (bNa) return sortDir === "asc" ? -1 : 1;
       return sortDir === "asc" ? aKey - bKey : bKey - aKey;
     });
-  }, [rows, agent, creator, client, status, dayAppFrom, dayAppTo, dayInsFrom, dayInsTo, q, sortBy, sortDir]);
+  }, [
+    rows,
+    agent,
+    creator,
+    client,
+    status,
+    dayAppFrom,
+    dayAppTo,
+    dayInsFrom,
+    dayInsTo,
+    q,
+    sortBy,
+    sortDir,
+  ]);
 
-  {/* ───────────────── Leaderboard operatori del mese ───────────────── */}
+  {
+    /* ───────────────── Leaderboard operatori del mese ───────────────── */
+  }
   <div className="mt-4">
     <OperatorLeaderboardCard rows={rows} target={15} />
-  </div>
-  
-const cancellationStats = useMemo(() => {
-  // Helper: anno-mese di una data (supporta Date o stringa ISO)
-  function ymOf(d) {
-    if (!d) return null;
-    const dt = d instanceof Date ? d : new Date(d);
-    if (Number.isNaN(dt.getTime())) return null;
-    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`;
-  }
+  </div>;
 
-  const ym = `${annYear}-${String(annMonth).padStart(2, "0")}`;
-
-  // Base coerente con i filtri di contesto (agente/operatore/cliente + ricerca libera)
-  let base = rows;
-  if (agent !== "tutti") {
-    const key = normalizeAgentName(agent);
-    base = base.filter(r => normalizeAgentName(r.agente) === key);
-  }  
-  if (creator !== "tutti") base = base.filter(r => (r.operatore || "").toLowerCase() === creator);
-  if (client !== "tutti")  base = base.filter(r => r.cliente === client);
-  if (q?.trim()) {
-    const n = q.trim().toLowerCase();
-    base = base.filter((r) =>
-      [
-        r.azienda, r.referente, r.email, r.telefono, r.piva, r.città, r.indirizzo,
-        r.provincia, r.agente, r.operatore, r.cliente, r.idContaq, r.note,
-      ]
-      .filter(Boolean)
-      .some((v) => String(v).toLowerCase().includes(n))
-    );
-  }
-
-  const insMap = new Map(); // inseriti nel mese (denominatore)
-  const annMap = new Map(); // annullati "arrivati" nel mese (numeratore)
-
-  for (const r of base) {
-    const op = (r.operatore || "—").toLowerCase();
-
-    // Denominatore: data inserimento nel mese
-    if (ymOf(r.dataInserimento) === ym) {
-      insMap.set(op, (insMap.get(op) || 0) + 1);
+  const cancellationStats = useMemo(() => {
+    // Helper: anno-mese di una data (supporta Date o stringa ISO)
+    function ymOf(d) {
+      if (!d) return null;
+      const dt = d instanceof Date ? d : new Date(d);
+      if (Number.isNaN(dt.getTime())) return null;
+      return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`;
     }
 
-    // Numeratore: stato annullato con data annullamento nel mese
-    if ((r.stato || "").toLowerCase() === "annullato" && ymOf(r.dataAnnullamento) === ym) {
-      annMap.set(op, (annMap.get(op) || 0) + 1);
+    const ym = `${annYear}-${String(annMonth).padStart(2, "0")}`;
+
+    // Base coerente con i filtri di contesto (agente/operatore/cliente + ricerca libera)
+    let base = rows;
+    if (agent !== "tutti") {
+      const key = normalizeAgentName(agent);
+      base = base.filter((r) => normalizeAgentName(r.agente) === key);
     }
-  }
-
-  const ops = new Set([...insMap.keys(), ...annMap.keys()]);
-  const out = [];
-  for (const op of ops) {
-    const inseritiMese  = insMap.get(op) || 0;
-    const annullatiMese = annMap.get(op) || 0;
-    const percAnnulli   = inseritiMese > 0 ? (annullatiMese / inseritiMese) : null; // null = N/D
-    out.push({ operatore: op, inseritiMese, annullatiMese, percAnnulli });
-  }
-
-  out.sort((a, b) => (b.percAnnulli ?? -1) - (a.percAnnulli ?? -1));
-  return out;
-}, [rows, agent, creator, client, q, annMonth, annYear]);
-
-const cancellationByClient = useMemo(() => {
-  function ymOf(d) {
-    if (!d) return null;
-    const dt = d instanceof Date ? d : new Date(d);
-    if (Number.isNaN(dt.getTime())) return null;
-    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`;
-  }
-  const ym = `${annYear}-${String(annMonth).padStart(2, "0")}`;
-
-  // stessa base dei filtri già usata per cancellationStats
-  let base = rows;
-  if (agent !== "tutti") {
-    const key = normalizeAgentName(agent);
-    base = base.filter(r => normalizeAgentName(r.agente) === key);
-  }  
-  if (creator !== "tutti") base = base.filter(r => (r.operatore || "").toLowerCase() === creator);
-  if (client !== "tutti")  base = base.filter(r => r.cliente === client);
-  if (q?.trim()) {
-    const n = q.trim().toLowerCase();
-    base = base.filter((r) =>
-      [
-        r.azienda, r.referente, r.email, r.telefono, r.piva, r.città, r.indirizzo,
-        r.provincia, r.agente, r.operatore, r.cliente, r.idContaq, r.note,
-      ]
-        .filter(Boolean)
-        .some((v) => String(v).toLowerCase().includes(n))
-    );
-  }
-
-  const insMap = new Map(); // inseriti nel mese
-  const annMap = new Map(); // annullati con data annullamento nel mese
-
-  for (const r of base) {
-    const cli = r.cliente || "—";
-    if (ymOf(r.dataInserimento) === ym) {
-      insMap.set(cli, (insMap.get(cli) || 0) + 1);
+    if (creator !== "tutti")
+      base = base.filter((r) => (r.operatore || "").toLowerCase() === creator);
+    if (client !== "tutti") base = base.filter((r) => r.cliente === client);
+    if (q?.trim()) {
+      const n = q.trim().toLowerCase();
+      base = base.filter((r) =>
+        [
+          r.azienda,
+          r.referente,
+          r.email,
+          r.telefono,
+          r.piva,
+          r.città,
+          r.indirizzo,
+          r.provincia,
+          r.agente,
+          r.operatore,
+          r.cliente,
+          r.idContaq,
+          r.note,
+        ]
+          .filter(Boolean)
+          .some((v) => String(v).toLowerCase().includes(n)),
+      );
     }
-    if ((r.stato || "").toLowerCase() === "annullato" && ymOf(r.dataAnnullamento) === ym) {
-      annMap.set(cli, (annMap.get(cli) || 0) + 1);
+
+    const insMap = new Map(); // inseriti nel mese (denominatore)
+    const annMap = new Map(); // annullati "arrivati" nel mese (numeratore)
+
+    for (const r of base) {
+      const op = (r.operatore || "—").toLowerCase();
+
+      // Denominatore: data inserimento nel mese
+      if (ymOf(r.dataInserimento) === ym) {
+        insMap.set(op, (insMap.get(op) || 0) + 1);
+      }
+
+      // Numeratore: stato annullato con data annullamento nel mese
+      if (
+        (r.stato || "").toLowerCase() === "annullato" &&
+        ymOf(r.dataAnnullamento) === ym
+      ) {
+        annMap.set(op, (annMap.get(op) || 0) + 1);
+      }
     }
-  }
 
-  const clients = new Set([...insMap.keys(), ...annMap.keys()]);
-  const out = [];
-  for (const cli of clients) {
-    const inseritiMese  = insMap.get(cli) || 0;
-    const annullatiMese = annMap.get(cli) || 0;
-    const buoniMese     = Math.max(0, inseritiMese - annullatiMese);
-    out.push({ cliente: cli, inseritiMese, annullatiMese, buoniMese });
-  }
+    const ops = new Set([...insMap.keys(), ...annMap.keys()]);
+    const out = [];
+    for (const op of ops) {
+      const inseritiMese = insMap.get(op) || 0;
+      const annullatiMese = annMap.get(op) || 0;
+      const percAnnulli =
+        inseritiMese > 0 ? annullatiMese / inseritiMese : null; // null = N/D
+      out.push({ operatore: op, inseritiMese, annullatiMese, percAnnulli });
+    }
 
-  out.sort((a, b) => (b.buoniMese - a.buoniMese) || a.cliente.localeCompare(b.cliente, "it", { sensitivity: "base" }));
-  return out;
-}, [rows, agent, creator, client, q, annMonth, annYear]);
+    out.sort((a, b) => (b.percAnnulli ?? -1) - (a.percAnnulli ?? -1));
+    return out;
+  }, [rows, agent, creator, client, q, annMonth, annYear]);
 
-const cancellationDetailRows = useMemo(() => {
-  function ymOf(d) {
-    if (!d) return null;
-    const dt = d instanceof Date ? d : new Date(d);
-    if (Number.isNaN(dt.getTime())) return null;
-    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`;
-  }
-  const ym = `${annYear}-${String(annMonth).padStart(2, "0")}`;
+  const cancellationByClient = useMemo(() => {
+    function ymOf(d) {
+      if (!d) return null;
+      const dt = d instanceof Date ? d : new Date(d);
+      if (Number.isNaN(dt.getTime())) return null;
+      return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`;
+    }
+    const ym = `${annYear}-${String(annMonth).padStart(2, "0")}`;
 
-  // Base coerente con i filtri di contesto (agente/operatore/cliente + ricerca libera),
-  // ignorando volutamente filtri di stato/data: l'intervallo è il mese selezionato.
-  let base = rows;
-  if (agent !== "tutti") {
-    const key = normalizeAgentName(agent);
-    base = base.filter(r => normalizeAgentName(r.agente) === key);
-  }  
-  if (creator !== "tutti") base = base.filter(r => (r.operatore || "").toLowerCase() === creator);
-  if (client !== "tutti")  base = base.filter(r => r.cliente === client);
-  if (q?.trim()) {
-    const n = q.trim().toLowerCase();
-    base = base.filter((r) =>
-      [
-        r.azienda, r.referente, r.email, r.telefono, r.piva, r.città, r.indirizzo,
-        r.provincia, r.agente, r.operatore, r.cliente, r.idContaq, r.note,
-      ]
-      .filter(Boolean)
-      .some((v) => String(v).toLowerCase().includes(n))
+    // stessa base dei filtri già usata per cancellationStats
+    let base = rows;
+    if (agent !== "tutti") {
+      const key = normalizeAgentName(agent);
+      base = base.filter((r) => normalizeAgentName(r.agente) === key);
+    }
+    if (creator !== "tutti")
+      base = base.filter((r) => (r.operatore || "").toLowerCase() === creator);
+    if (client !== "tutti") base = base.filter((r) => r.cliente === client);
+    if (q?.trim()) {
+      const n = q.trim().toLowerCase();
+      base = base.filter((r) =>
+        [
+          r.azienda,
+          r.referente,
+          r.email,
+          r.telefono,
+          r.piva,
+          r.città,
+          r.indirizzo,
+          r.provincia,
+          r.agente,
+          r.operatore,
+          r.cliente,
+          r.idContaq,
+          r.note,
+        ]
+          .filter(Boolean)
+          .some((v) => String(v).toLowerCase().includes(n)),
+      );
+    }
+
+    const insMap = new Map(); // inseriti nel mese
+    const annMap = new Map(); // annullati con data annullamento nel mese
+
+    for (const r of base) {
+      const cli = r.cliente || "—";
+      if (ymOf(r.dataInserimento) === ym) {
+        insMap.set(cli, (insMap.get(cli) || 0) + 1);
+      }
+      if (
+        (r.stato || "").toLowerCase() === "annullato" &&
+        ymOf(r.dataAnnullamento) === ym
+      ) {
+        annMap.set(cli, (annMap.get(cli) || 0) + 1);
+      }
+    }
+
+    const clients = new Set([...insMap.keys(), ...annMap.keys()]);
+    const out = [];
+    for (const cli of clients) {
+      const inseritiMese = insMap.get(cli) || 0;
+      const annullatiMese = annMap.get(cli) || 0;
+      const buoniMese = Math.max(0, inseritiMese - annullatiMese);
+      out.push({ cliente: cli, inseritiMese, annullatiMese, buoniMese });
+    }
+
+    out.sort(
+      (a, b) =>
+        b.buoniMese - a.buoniMese ||
+        a.cliente.localeCompare(b.cliente, "it", { sensitivity: "base" }),
     );
-  }
+    return out;
+  }, [rows, agent, creator, client, q, annMonth, annYear]);
 
-  // Dettaglio del MESE: prendiamo tutti gli app.
-  // (1) inseriti nel mese  OR  (2) annullati nel mese
-  const detail = base.filter(r => {
-    const inseritoYM = ymOf(r.dataInserimento) === ym;
-    const annYM = (r.stato || "").toLowerCase() === "annullato" && ymOf(r.dataAnnullamento) === ym;
-    return inseritoYM || annYM;
-  });
+  const cancellationDetailRows = useMemo(() => {
+    function ymOf(d) {
+      if (!d) return null;
+      const dt = d instanceof Date ? d : new Date(d);
+      if (Number.isNaN(dt.getTime())) return null;
+      return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`;
+    }
+    const ym = `${annYear}-${String(annMonth).padStart(2, "0")}`;
 
-  // Ordine: Operatore asc, poi Data Inserimento asc, poi ID
-  detail.sort((a, b) => {
-    const oa = (a.operatore || "—").localeCompare(b.operatore || "—", "it", { sensitivity: "base" });
-    if (oa !== 0) return oa;
-    const da = new Date(a.dataInserimento || 0).getTime();
-    const db = new Date(b.dataInserimento || 0).getTime();
-    if (da !== db) return da - db;
-    return String(a.id || "").localeCompare(String(b.id || ""));
-  });
+    // Base coerente con i filtri di contesto (agente/operatore/cliente + ricerca libera),
+    // ignorando volutamente filtri di stato/data: l'intervallo è il mese selezionato.
+    let base = rows;
+    if (agent !== "tutti") {
+      const key = normalizeAgentName(agent);
+      base = base.filter((r) => normalizeAgentName(r.agente) === key);
+    }
+    if (creator !== "tutti")
+      base = base.filter((r) => (r.operatore || "").toLowerCase() === creator);
+    if (client !== "tutti") base = base.filter((r) => r.cliente === client);
+    if (q?.trim()) {
+      const n = q.trim().toLowerCase();
+      base = base.filter((r) =>
+        [
+          r.azienda,
+          r.referente,
+          r.email,
+          r.telefono,
+          r.piva,
+          r.città,
+          r.indirizzo,
+          r.provincia,
+          r.agente,
+          r.operatore,
+          r.cliente,
+          r.idContaq,
+          r.note,
+        ]
+          .filter(Boolean)
+          .some((v) => String(v).toLowerCase().includes(n)),
+      );
+    }
 
-  return detail;
-}, [rows, agent, creator, client, q, annMonth, annYear]);
+    // Dettaglio del MESE: prendiamo tutti gli app.
+    // (1) inseriti nel mese  OR  (2) annullati nel mese
+    const detail = base.filter((r) => {
+      const inseritoYM = ymOf(r.dataInserimento) === ym;
+      const annYM =
+        (r.stato || "").toLowerCase() === "annullato" &&
+        ymOf(r.dataAnnullamento) === ym;
+      return inseritoYM || annYM;
+    });
 
-const todayByClient = useMemo(() => {
-  // oggi (in locale) — confrontiamo solo Y-M-D
-  const today = new Date();
-  const y = today.getFullYear();
-  const m = today.getMonth();
-  const d = today.getDate();
+    // Ordine: Operatore asc, poi Data Inserimento asc, poi ID
+    detail.sort((a, b) => {
+      const oa = (a.operatore || "—").localeCompare(b.operatore || "—", "it", {
+        sensitivity: "base",
+      });
+      if (oa !== 0) return oa;
+      const da = new Date(a.dataInserimento || 0).getTime();
+      const db = new Date(b.dataInserimento || 0).getTime();
+      if (da !== db) return da - db;
+      return String(a.id || "").localeCompare(String(b.id || ""));
+    });
 
-  function isToday(dateLike) {
-    if (!dateLike) return false;
-    const dt = dateLike instanceof Date ? dateLike : new Date(dateLike);
-    return (
-      dt.getFullYear() === y &&
-      dt.getMonth() === m &&
-      dt.getDate() === d
+    return detail;
+  }, [rows, agent, creator, client, q, annMonth, annYear]);
+
+  const todayByClient = useMemo(() => {
+    // oggi (in locale) — confrontiamo solo Y-M-D
+    const today = new Date();
+    const y = today.getFullYear();
+    const m = today.getMonth();
+    const d = today.getDate();
+
+    function isToday(dateLike) {
+      if (!dateLike) return false;
+      const dt = dateLike instanceof Date ? dateLike : new Date(dateLike);
+      return (
+        dt.getFullYear() === y && dt.getMonth() === m && dt.getDate() === d
+      );
+    }
+
+    // Base coerente con i filtri di contesto
+    let base = rows;
+    if (agent !== "tutti") {
+      const key = normalizeAgentName(agent);
+      base = base.filter((r) => normalizeAgentName(r.agente) === key);
+    }
+    if (creator !== "tutti")
+      base = base.filter((r) => (r.operatore || "").toLowerCase() === creator);
+    if (client !== "tutti") base = base.filter((r) => r.cliente === client);
+    if (q?.trim()) {
+      const n = q.trim().toLowerCase();
+      base = base.filter((r) =>
+        [
+          r.azienda,
+          r.referente,
+          r.email,
+          r.telefono,
+          r.piva,
+          r.città,
+          r.indirizzo,
+          r.provincia,
+          r.agente,
+          r.operatore,
+          r.cliente,
+          r.idContaq,
+          r.note,
+        ]
+          .filter(Boolean)
+          .some((v) => String(v).toLowerCase().includes(n)),
+      );
+    }
+
+    // 🔴 QUI il cambio: consideriamo SOLO gli appuntamenti INSERITI OGGI
+    const todayRows = base.filter((r) => isToday(r.dataInserimento));
+
+    // Raggruppo per cliente e conteggi stato
+    const map = new Map();
+    for (const r of todayRows) {
+      const cli = r.cliente || "—";
+      if (!map.has(cli))
+        map.set(cli, {
+          cliente: cli,
+          programmati: 0,
+          svolti: 0,
+          annullati: 0,
+          recuperati: 0,
+          totale: 0,
+        });
+      const g = map.get(cli);
+      const stato = (r.stato || "").toLowerCase();
+      if (stato === "svolto") g.svolti += 1;
+      else if (stato === "annullato") g.annullati += 1;
+      else if (stato === "recuperato") g.recuperati += 1;
+      else g.programmati += 1;
+      g.totale += 1;
+    }
+
+    const out = Array.from(map.values());
+    out.sort(
+      (a, b) =>
+        b.totale - a.totale ||
+        a.cliente.localeCompare(b.cliente, "it", { sensitivity: "base" }),
     );
-  }
 
-  // Base coerente con i filtri di contesto
-  let base = rows;
-  if (agent !== "tutti") {
-    const key = normalizeAgentName(agent);
-    base = base.filter(r => normalizeAgentName(r.agente) === key);
-  }  
-  if (creator !== "tutti") base = base.filter(r => (r.operatore || "").toLowerCase() === creator);
-  if (client !== "tutti")  base = base.filter(r => r.cliente === client);
-  if (q?.trim()) {
-    const n = q.trim().toLowerCase();
-    base = base.filter((r) =>
-      [
-        r.azienda, r.referente, r.email, r.telefono, r.piva, r.città, r.indirizzo,
-        r.provincia, r.agente, r.operatore, r.cliente, r.idContaq, r.note,
-      ]
-      .filter(Boolean)
-      .some((v) => String(v).toLowerCase().includes(n))
+    const totals = out.reduce(
+      (acc, r) => {
+        acc.programmati += r.programmati;
+        acc.svolti += r.svolti;
+        acc.annullati += r.annullati;
+        acc.recuperati += r.recuperati;
+        acc.totale += r.totale;
+        return acc;
+      },
+      { programmati: 0, svolti: 0, annullati: 0, recuperati: 0, totale: 0 },
     );
-  }
 
-  // 🔴 QUI il cambio: consideriamo SOLO gli appuntamenti INSERITI OGGI
-  const todayRows = base.filter(r => isToday(r.dataInserimento));
+    return { rows: out, totals };
+  }, [rows, agent, creator, client, q]);
 
-  // Raggruppo per cliente e conteggi stato
-  const map = new Map();
-  for (const r of todayRows) {
-    const cli = r.cliente || "—";
-    if (!map.has(cli)) map.set(cli, { cliente: cli, programmati: 0, svolti: 0, annullati: 0, recuperati: 0, totale: 0 });
-    const g = map.get(cli);
-    const stato = (r.stato || "").toLowerCase();
-    if (stato === "svolto") g.svolti += 1;
-    else if (stato === "annullato") g.annullati += 1;
-    else if (stato === "recuperato") g.recuperati += 1;
-    else g.programmati += 1;
-    g.totale += 1;
-  }
-
-  const out = Array.from(map.values());
-  out.sort((a, b) => b.totale - a.totale || a.cliente.localeCompare(b.cliente, "it", { sensitivity: "base" }));
-
-  const totals = out.reduce((acc, r) => {
-    acc.programmati += r.programmati;
-    acc.svolti += r.svolti;
-    acc.annullati += r.annullati;
-    acc.recuperati += r.recuperati;
-    acc.totale += r.totale;
-    return acc;
-  }, { programmati: 0, svolti: 0, annullati: 0, recuperati: 0, totale: 0 });
-
-  return { rows: out, totals };
-}, [rows, agent, creator, client, q]);
-
-
-  
   /* paginazione */
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize);
-  useEffect(() => { if (page > totalPages) setPage(1); }, [totalPages, page]);
+  useEffect(() => {
+    if (page > totalPages) setPage(1);
+  }, [totalPages, page]);
 
   /* KPI */
   const kpis = useMemo(() => {
@@ -3082,8 +3511,6 @@ const todayByClient = useMemo(() => {
     setCreateOpen(true);
   }
 
-
-  
   // --- CREA NUOVO APPUNTAMENTO (con ritorno dal DB + dedup) ---
   async function handleCreate(form) {
     try {
@@ -3102,7 +3529,8 @@ const todayByClient = useMemo(() => {
           .replace(/\s+/g, " ")
           .toLowerCase();
         if (key === "sede" || key === "in sede") return "sede";
-        if (key === "videocall" || key === "video call" || key === "video-call") return "videocall";
+        if (key === "videocall" || key === "video call" || key === "video-call")
+          return "videocall";
         return null;
       };
       const tipoNorm = normalizeTipo(form?.tipo_appuntamento);
@@ -3132,7 +3560,9 @@ const todayByClient = useMemo(() => {
 
       if (error) {
         console.error("Insert error:", error);
-        alert("Errore durante la creazione: " + (error.message || "insert failed"));
+        alert(
+          "Errore durante la creazione: " + (error.message || "insert failed"),
+        );
         return false;
       }
 
@@ -3140,7 +3570,7 @@ const todayByClient = useMemo(() => {
       const serverRow = rowFromDb(data);
 
       setRows((prev) =>
-        prev.some((x) => x.id === serverRow.id) ? prev : [serverRow, ...prev]
+        prev.some((x) => x.id === serverRow.id) ? prev : [serverRow, ...prev],
       );
 
       return true;
@@ -3150,7 +3580,6 @@ const todayByClient = useMemo(() => {
       return false;
     }
   }
-
 
   async function _updateRow(id, patch) {
     const dbPatch = patchToDb(patch);
@@ -3174,13 +3603,12 @@ const todayByClient = useMemo(() => {
     return true;
   }
 
-
   async function updateRowSecure(id, patch) {
     if (!ensureEditPassword()) return false;
     return _updateRow(id, patch);
   }
-  
-   async function updateConfirmed(r) {
+
+  async function updateConfirmed(r) {
     const patch = { confermato: !r.confermato };
     const { data, error } = await supabase
       .from("appointments")
@@ -3195,7 +3623,9 @@ const todayByClient = useMemo(() => {
       alert("Permesso negato (RLS)");
       return false;
     }
-    setRows((p) => p.map((row) => (row.id === r.id ? { ...row, ...patch } : row)));
+    setRows((p) =>
+      p.map((row) => (row.id === r.id ? { ...row, ...patch } : row)),
+    );
     return true;
   }
 
@@ -3218,25 +3648,42 @@ const todayByClient = useMemo(() => {
     return true;
   }
 
-  function markSvolto(r) { 
-  return updateRowSecure(r.id, { stato: "svolto", dataAnnullamento: null }); 
-}
-function markAnnullato(r) { 
-  return updateRowSecure(r.id, { stato: "annullato", dataAnnullamento: todayISO() }); 
-}
-function markRecupero(r) { 
-  return updateRowSecure(r.id, { stato: "recuperato", dataAnnullamento: null }); 
-}
-  function markFatturato(r) { return updateRowSecure(r.id, { fatturato: true, dataFatturazione: todayISO() }); }
-  function unmarkFatturato(r) { return updateRowSecure(r.id, { fatturato: false, dataFatturazione: "" }); }
+  function markSvolto(r) {
+    return updateRowSecure(r.id, { stato: "svolto", dataAnnullamento: null });
+  }
+  function markAnnullato(r) {
+    return updateRowSecure(r.id, {
+      stato: "annullato",
+      dataAnnullamento: todayISO(),
+    });
+  }
+  function markRecupero(r) {
+    return updateRowSecure(r.id, {
+      stato: "recuperato",
+      dataAnnullamento: null,
+    });
+  }
+  function markFatturato(r) {
+    return updateRowSecure(r.id, {
+      fatturato: true,
+      dataFatturazione: todayISO(),
+    });
+  }
+  function unmarkFatturato(r) {
+    return updateRowSecure(r.id, { fatturato: false, dataFatturazione: "" });
+  }
 
   async function clearAll() {
     const pwd = prompt(
-      "ATTENZIONE: eliminerai TUTTI gli appuntamenti.\nInserisci la password per confermare:"
+      "ATTENZIONE: eliminerai TUTTI gli appuntamenti.\nInserisci la password per confermare:",
     );
-    if (pwd !== CLEAR_ALL_PASSWORD) return alert("Password errata. Operazione annullata.");
+    if (pwd !== CLEAR_ALL_PASSWORD)
+      return alert("Password errata. Operazione annullata.");
     if (!confirm("Confermi l'eliminazione definitiva?")) return;
-    const { error } = await supabase.from("appointments").delete().neq("id", "");
+    const { error } = await supabase
+      .from("appointments")
+      .delete()
+      .neq("id", "");
     if (error) {
       alert(`Errore eliminazione: ${error.message}`);
       return;
@@ -3246,29 +3693,31 @@ function markRecupero(r) {
 
   function downloadTemplate() {
     const wb = XLSX.utils.book_new();
-    const sample = [{
-      ID: generateId(),
-      "ID Contaq": "",
-      "Data Inserimento": todayISO(),
-      "Ora Inserimento": nowHM(),
-      "Data Appuntamento": todayISO(),
-      "Ora Appuntamento": "09:00",
-      Azienda: "ACME S.p.A.",
-      Referente: "Mario Rossi",
-      Telefono: "021234567",
-      Email: "mario@example.com",
-      "Città": "Milano",
-      Provincia: "MI",
-      Agente: "Bianchi",
-      Operatore: "Operatore1",
-      Cliente: "Coface",
-      Stato: "programmato",
-      "Data Annullamento": "",
-      Note: "",
-      Fatturabile: "No",
-      Fatturato: "No",
-      "Data Fatturazione": "",
-    }];
+    const sample = [
+      {
+        ID: generateId(),
+        "ID Contaq": "",
+        "Data Inserimento": todayISO(),
+        "Ora Inserimento": nowHM(),
+        "Data Appuntamento": todayISO(),
+        "Ora Appuntamento": "09:00",
+        Azienda: "ACME S.p.A.",
+        Referente: "Mario Rossi",
+        Telefono: "021234567",
+        Email: "mario@example.com",
+        Città: "Milano",
+        Provincia: "MI",
+        Agente: "Bianchi",
+        Operatore: "Operatore1",
+        Cliente: "Coface",
+        Stato: "programmato",
+        "Data Annullamento": "",
+        Note: "",
+        Fatturabile: "No",
+        Fatturato: "No",
+        "Data Fatturazione": "",
+      },
+    ];
     const ws = XLSX.utils.json_to_sheet(sample, { header: DEFAULT_HEADERS });
     XLSX.utils.book_append_sheet(wb, ws, "Appuntamenti");
     XLSX.writeFile(wb, "template_appuntamenti.xlsx");
@@ -3282,13 +3731,20 @@ function markRecupero(r) {
       const ws = wb.Sheets[wb.SheetNames[0]];
       const json = XLSX.utils.sheet_to_json(ws, { defval: "" });
       const mapped = json.map((r) => {
-        let statoRaw = String(r["Stato"] || "").toLowerCase().trim().replace(/\s+/g, "_");
+        let statoRaw = String(r["Stato"] || "")
+          .toLowerCase()
+          .trim()
+          .replace(/\s+/g, "_");
         if (statoRaw === "da_recuperare") statoRaw = "recuperato";
         const allowed = ["programmato", "svolto", "annullato", "recuperato"];
         const stato = allowed.includes(statoRaw) ? statoRaw : "programmato";
 
-        const fatturatoRaw = String(r["Fatturato"] || "").toLowerCase().trim();
-        const fatturato = ["si", "sì", "true", "1", "x", "yes"].includes(fatturatoRaw);
+        const fatturatoRaw = String(r["Fatturato"] || "")
+          .toLowerCase()
+          .trim();
+        const fatturato = ["si", "sì", "true", "1", "x", "yes"].includes(
+          fatturatoRaw,
+        );
 
         const obj = {
           id: r["ID"] || generateId(),
@@ -3336,7 +3792,7 @@ function markRecupero(r) {
       Referente: r.referente || "",
       Telefono: r.telefono || "",
       Email: r.email || "",
-      "Città": r.città || "",
+      Città: r.città || "",
       Provincia: r.provincia || "",
       Agente: r.agente || "",
       Operatore: r.operatore || "",
@@ -3351,25 +3807,52 @@ function markRecupero(r) {
     const ws = XLSX.utils.json_to_sheet(data, { header: DEFAULT_HEADERS });
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Appuntamenti");
-    XLSX.writeFile(wb, `export_appuntamenti_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.writeFile(
+      wb,
+      `export_appuntamenti_${new Date().toISOString().slice(0, 10)}.xlsx`,
+    );
   }
 
   function exportCSVFatturazione() {
     const header = [
-      "ID","ID Contaq","Data Inserimento","Ora Inserimento","Data Appuntamento",
-      "Ora Appuntamento","Azienda","Referente","Agente","Operatore","Cliente",
-      "Provincia","Fatturabile",
+      "ID",
+      "ID Contaq",
+      "Data Inserimento",
+      "Ora Inserimento",
+      "Data Appuntamento",
+      "Ora Appuntamento",
+      "Azienda",
+      "Referente",
+      "Agente",
+      "Operatore",
+      "Cliente",
+      "Provincia",
+      "Fatturabile",
     ].join(",");
     const lines = filtered
       .filter((r) => r.stato === "svolto" && !r.fatturato)
       .map((r) =>
         [
-          r.id, r.idContaq || "", r.dataInserimento || "", r.oraInserimento || "",
-          r.data || "", r.ora || "", r.azienda || "", r.referente || "",
-          r.agente || "", r.operatore || "", r.cliente || "", r.provincia || "", "Sì",
-        ].map(csvSafe).join(",")
+          r.id,
+          r.idContaq || "",
+          r.dataInserimento || "",
+          r.oraInserimento || "",
+          r.data || "",
+          r.ora || "",
+          r.azienda || "",
+          r.referente || "",
+          r.agente || "",
+          r.operatore || "",
+          r.cliente || "",
+          r.provincia || "",
+          "Sì",
+        ]
+          .map(csvSafe)
+          .join(","),
       );
-    const blob = new Blob([header + "\n" + lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const blob = new Blob([header + "\n" + lines.join("\n")], {
+      type: "text/csv;charset=utf-8;",
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -3398,14 +3881,27 @@ function markRecupero(r) {
       }));
     const ws = XLSX.utils.json_to_sheet(data, {
       header: [
-        "ID","ID Contaq","Data Inserimento","Ora Inserimento","Data Appuntamento",
-        "Ora Appuntamento","Azienda","Referente","Agente","Operatore","Cliente",
-        "Provincia","Fatturabile",
+        "ID",
+        "ID Contaq",
+        "Data Inserimento",
+        "Ora Inserimento",
+        "Data Appuntamento",
+        "Ora Appuntamento",
+        "Azienda",
+        "Referente",
+        "Agente",
+        "Operatore",
+        "Cliente",
+        "Provincia",
+        "Fatturabile",
       ],
     });
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Fatturazione");
-    XLSX.writeFile(wb, `fatturazione_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.writeFile(
+      wb,
+      `fatturazione_${new Date().toISOString().slice(0, 10)}.xlsx`,
+    );
   }
 
   /* UI helpers */
@@ -3430,25 +3926,34 @@ function markRecupero(r) {
   }
 
   function Row({ r }) {
-    const statusBadge = {
-      programmato: "bg-blue-50 text-blue-700 border-blue-200",
-      svolto: "bg-green-50 text-green-700 border-green-200",
-      annullato: "bg-red-50 text-red-700 border-red-200",
-      recuperato: "bg-amber-50 text-amber-700 border-amber-200",
-    }[r.stato] || "";
+    const statusBadge =
+      {
+        programmato: "bg-blue-50 text-blue-700 border-blue-200",
+        svolto: "bg-green-50 text-green-700 border-green-200",
+        annullato: "bg-red-50 text-red-700 border-red-200",
+        recuperato: "bg-amber-50 text-amber-700 border-amber-200",
+      }[r.stato] || "";
 
     const tipoLabel =
-      r.tipo_appuntamento === "sede" ? "In sede" :
-      r.tipo_appuntamento === "videocall" ? "Videocall" :
-      "—";
+      r.tipo_appuntamento === "sede"
+        ? "In sede"
+        : r.tipo_appuntamento === "videocall"
+          ? "Videocall"
+          : "—";
 
     return (
       <tr className="border-b hover:bg-gray-50">
         <td className="p-2 font-mono text-xs opacity-60">
           <div>{r.id}</div>
-          {r.confermato && <div className="text-[11px] text-green-600 font-semibold">Confermato</div>}
+          {r.confermato && (
+            <div className="text-[11px] text-green-600 font-semibold">
+              Confermato
+            </div>
+          )}
         </td>
-        <td className="p-2">{r.operatore || <span className="opacity-50">—</span>}</td>
+        <td className="p-2">
+          {r.operatore || <span className="opacity-50">—</span>}
+        </td>
         <td className="p-2 whitespace-nowrap">
           {fmtDate(r.dataInserimento)}
           <div className="text-xs opacity-60">{r.oraInserimento}</div>
@@ -3458,19 +3963,25 @@ function markRecupero(r) {
           <div className="text-xs opacity-60">{r.ora}</div>
         </td>
         <td className="p-2">
-          <div className="font-medium">{r.azienda || <span className="opacity-50">—</span>}</div>
+          <div className="font-medium">
+            {r.azienda || <span className="opacity-50">—</span>}
+          </div>
           <div className="text-xs opacity-60">{r.referente || ""}</div>
         </td>
         <td className="p-2">
           <div>{r.città || <span className="opacity-50">—</span>}</div>
           <div className="text-xs opacity-60">{r.provincia}</div>
         </td>
-        <td className="p-2">{r.cliente || <span className="opacity-50">—</span>}</td>
+        <td className="p-2">
+          {r.cliente || <span className="opacity-50">—</span>}
+        </td>
         <td className="p-2">{r.agente}</td>
         {/* ✅ Nuova colonna Tipo */}
         <td className="p-2">{tipoLabel}</td>
         <td className="p-2">
-          <span className={`text-xs px-2 py-1 rounded-full border ${statusBadge}`}>
+          <span
+            className={`text-xs px-2 py-1 rounded-full border ${statusBadge}`}
+          >
             {STATUSES.find((s) => s.value === r.stato)?.label}
           </span>
           {r.stato === "annullato" && r.dataAnnullamento && (
@@ -3480,7 +3991,8 @@ function markRecupero(r) {
           )}
           {r.fatturato && (
             <div className="text-[11px] mt-1 px-2 py-0.5 rounded-full border bg-gray-50">
-              Fatturato {r.dataFatturazione ? `(${fmtDate(r.dataFatturazione)})` : ""}
+              Fatturato{" "}
+              {r.dataFatturazione ? `(${fmtDate(r.dataFatturazione)})` : ""}
             </div>
           )}
         </td>
@@ -3535,13 +4047,13 @@ function markRecupero(r) {
                 <Trash2 className="h-4 w-4" />
               </Button>
             )}
-            
+
             <Button
               variant="outline"
               size="icon"
               className="h-8 w-8"
               onClick={() => updateConfirmed(r)}
-              title={r.confermato ? 'Togli conferma' : 'Conferma'}
+              title={r.confermato ? "Togli conferma" : "Conferma"}
             >
               <CheckCheck className="h-4 w-4" />
             </Button>
@@ -3559,16 +4071,15 @@ function markRecupero(r) {
         <LogoutButton />
       </div>
 
-        {/* Pulsante Calendario */}
-        <div className="mt-3">
-          <Link
-            href="/calendario"
-            className="inline-flex items-center gap-2 rounded-md bg-sky-600 px-3 py-1.5 text-white hover:bg-sky-700 shadow-sm"
-          >
-            📅 Apri Calendario
-          </Link>
-        </div>
-
+      {/* Pulsante Calendario */}
+      <div className="mt-3">
+        <Link
+          href="/calendario"
+          className="inline-flex items-center gap-2 rounded-md bg-sky-600 px-3 py-1.5 text-white hover:bg-sky-700 shadow-sm"
+        >
+          📅 Apri Calendario
+        </Link>
+      </div>
 
       {/* RIGA 1 – CERCA & FILTRI */}
       <Card>
@@ -3643,64 +4154,61 @@ function markRecupero(r) {
         <TodayByClientCard data={todayByClient} />
       </Collapsible>
 
+      {/* Leaderboard Operatori – collassabile, Mese/Anno, % annullati */}
+      <Collapsible
+        title="🏆 Classifica Operatori"
+        storageKey="coface:collapse:leaderboard-v3" // nuovo nome
+        defaultOpen={false} // chiusa di default
+      >
+        <OperatorLeaderboardProCard rows={rows} monthTarget={15} />
+      </Collapsible>
 
-  {/* Leaderboard Operatori – collassabile, Mese/Anno, % annullati */}
-  <Collapsible
-    title="🏆 Classifica Operatori"
-    storageKey="coface:collapse:leaderboard-v3"  // nuovo nome
-    defaultOpen={false}                          // chiusa di default
-  >
-    <OperatorLeaderboardProCard rows={rows} monthTarget={15} />
-  </Collapsible>
+      <Collapsible
+        title="📉 Annulli (mese vs inseriti)"
+        storageKey="coface:collapse:ann-stats"
+        defaultOpen={false}
+      >
+        <CancellationStatsCard
+          stats={cancellationStats}
+          byClient={cancellationByClient}
+          annMonth={annMonth}
+          setAnnMonth={setAnnMonth}
+          annYear={annYear}
+          setAnnYear={setAnnYear}
+          detailRows={cancellationDetailRows}
+        />
+      </Collapsible>
 
-  <Collapsible
-    title="📉 Annulli (mese vs inseriti)"
-    storageKey="coface:collapse:ann-stats"
-    defaultOpen={false}
-  >
-    <CancellationStatsCard
-      stats={cancellationStats}
-      byClient={cancellationByClient}
-      annMonth={annMonth}
-      setAnnMonth={setAnnMonth}
-      annYear={annYear}
-      setAnnYear={setAnnYear}
-      detailRows={cancellationDetailRows}
-    />
-  </Collapsible>
+      {/* 📊 Nuova card: capacità settimanale TCI */}
+      <Collapsible
+        title="📊 Capacità settimanale TCI"
+        storageKey="coface:collapse:tci-capacity"
+        defaultOpen={false}
+      >
+        <TciWeeklyCapacityCard rows={rows} target={4} />
+      </Collapsible>
 
-  {/* 📊 Nuova card: capacità settimanale TCI */}
-<Collapsible
-  title="📊 Capacità settimanale TCI"
-  storageKey="coface:collapse:tci-capacity"
-  defaultOpen={false}
->
-  <TciWeeklyCapacityCard rows={rows} target={4} />
-</Collapsible>
+      {/* ✅ Nuova card: statistiche per giorno di inserimento */}
+      <Collapsible
+        title="Statistiche per giorno di inserimento (ultimi 30 giorni presenti)"
+        storageKey="coface:collapse:ins-stats"
+        defaultOpen={false}
+      >
+        <InsertionStatsCard rows={rows} />
+      </Collapsible>
 
-
-  {/* ✅ Nuova card: statistiche per giorno di inserimento */}
-  <Collapsible
-    title="Statistiche per giorno di inserimento (ultimi 30 giorni presenti)"
-    storageKey="coface:collapse:ins-stats"
-    defaultOpen={false}
-  >
-    <InsertionStatsCard rows={rows} />
-  </Collapsible>
-
-  {/* STATISTICHE PER OPERATORE */}
-  <Collapsible
-    title="Statistiche per Operatore"
-    storageKey="coface:collapse:op-stats"
-    defaultOpen={false}
-  >
-    <OperatorStatsCard
-      rowsAll={rows}
-      rowsFiltered={filtered}
-      creators={creators}
-    />
-  </Collapsible>
-
+      {/* STATISTICHE PER OPERATORE */}
+      <Collapsible
+        title="Statistiche per Operatore"
+        storageKey="coface:collapse:op-stats"
+        defaultOpen={false}
+      >
+        <OperatorStatsCard
+          rowsAll={rows}
+          rowsFiltered={filtered}
+          creators={creators}
+        />
+      </Collapsible>
 
       {/* TABELLA */}
       <Card>
@@ -3713,19 +4221,29 @@ function markRecupero(r) {
               <Label className="whitespace-nowrap">Ordina per</Label>
               <Select
                 value={sortBy}
-                onValueChange={(v) => { setSortBy(v); setPage(1); }}
+                onValueChange={(v) => {
+                  setSortBy(v);
+                  setPage(1);
+                }}
               >
                 <SelectTrigger className="w-[220px] md:w-[220px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="inserimento">Inserimento (data/ora)</SelectItem>
-                  <SelectItem value="appuntamento">Appuntamento (data/ora)</SelectItem>
+                  <SelectItem value="inserimento">
+                    Inserimento (data/ora)
+                  </SelectItem>
+                  <SelectItem value="appuntamento">
+                    Appuntamento (data/ora)
+                  </SelectItem>
                 </SelectContent>
               </Select>
               <Select
                 value={sortDir}
-                onValueChange={(v) => { setSortDir(v); setPage(1); }}
+                onValueChange={(v) => {
+                  setSortDir(v);
+                  setPage(1);
+                }}
               >
                 <SelectTrigger className="w-[160px] md:w-[160px]">
                   <SelectValue />
@@ -3761,10 +4279,15 @@ function markRecupero(r) {
                 </tr>
               </thead>
               <tbody>
-                {pageRows.map((r) => (<Row key={r.id} r={r} />))}
+                {pageRows.map((r) => (
+                  <Row key={r.id} r={r} />
+                ))}
                 {pageRows.length === 0 && (
                   <tr>
-                    <td colSpan={11} className="p-6 text-center text-sm opacity-60">
+                    <td
+                      colSpan={11}
+                      className="p-6 text-center text-sm opacity-60"
+                    >
                       Nessun risultato
                     </td>
                   </tr>
@@ -3787,10 +4310,18 @@ function markRecupero(r) {
                 onChange={(e) => setPageSize(Number(e.target.value || 25))}
                 className="w-[90px]"
               />
-              <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
                 Precedente
               </Button>
-              <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
                 Successiva
               </Button>
             </div>
@@ -3799,8 +4330,9 @@ function markRecupero(r) {
       </Card>
 
       <p className="text-xs opacity-60">
-        Dati condivisi tramite Supabase (Postgres + Realtime). Import/Export Excel,
-        CSV/Excel fatturazione, password per modifiche “123”, cancellazione protetta.
+        Dati condivisi tramite Supabase (Postgres + Realtime). Import/Export
+        Excel, CSV/Excel fatturazione, password per modifiche “123”,
+        cancellazione protetta.
       </p>
 
       {/* Modale editor – usa funzioni protette */}
