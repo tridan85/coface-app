@@ -113,6 +113,7 @@ const CLIENTI_CANONICI = [
   "Biella",
   "ASSIPIACENZA",
   "DIE",
+  "PLUXEE",
 ];
 
 /* ====== Normalizzazione & Fuzzy-matching agenti ====== */

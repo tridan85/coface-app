@@ -61,12 +61,13 @@ const CLIENTI_CANONICI = [
   "TCI MACERATA",
   "TCI CATANIA",
   "Credito e Cauzioni",
-  "Satispay", // ✅ nuovo cliente
+  "Satispay",
   "ASSICOOP",
   "GENERALI",
   "Biella",
   "ASSIPIACENZA",
   "DIE",
+  "PLUXEE",
 ];
 
 const CLEAR_ALL_PASSWORD = "Password.2";
