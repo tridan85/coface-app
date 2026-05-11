@@ -881,7 +881,11 @@ const CLIENT_EMAIL_CONFIG = {
 
 function getClientEmailCfg(r, type) {
   const key = String(r?.cliente || "").trim();
-  const clientCfg = CLIENT_EMAIL_CONFIG[key];
+  const clientCfg =
+    CLIENT_EMAIL_CONFIG[key] ||
+    Object.entries(CLIENT_EMAIL_CONFIG).find(
+      ([k]) => k !== "DEFAULT" && k.toLowerCase() === key.toLowerCase()
+    )?.[1];
   return (clientCfg && clientCfg[type] !== undefined)
     ? clientCfg[type]
     : CLIENT_EMAIL_CONFIG.DEFAULT[type];
