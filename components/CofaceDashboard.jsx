@@ -846,11 +846,9 @@ function getClientEmailCfg(r, type) {
     Object.entries(CLIENT_EMAIL_CONFIG).find(
       ([k]) => k !== "DEFAULT" && k.toLowerCase() === key.toLowerCase()
     )?.[1];
-  const result = (clientCfg && clientCfg[type] !== undefined)
+  return (clientCfg && clientCfg[type] !== undefined)
     ? clientCfg[type]
     : CLIENT_EMAIL_CONFIG.DEFAULT[type];
-  console.log("[EMAIL DEBUG] cliente:", JSON.stringify(r?.cliente), "| key:", JSON.stringify(key), "| type:", type, "| found:", !!clientCfg, "| cfg:", result);
-  return result;
 }
 
 /* ────────────────────────────────────────────────────────────── */
@@ -904,7 +902,7 @@ function makeEmailAgente(r) {
 
 function makeEmailAzienda(r) {
   const dataGGMM = fmtDate(r?.data); // formato gg/mm/aaaa
-  const subject = `[DEBUG cliente=${JSON.stringify(r?.cliente)}] Conferma appuntamento Coface - ${dataGGMM} alle ore ${r?.ora || ""} - ${r?.azienda || ""}`;
+  const subject = `Conferma appuntamento Coface - ${dataGGMM} alle ore ${r?.ora || ""} - ${r?.azienda || ""}`;
   const body = [
     `Gentile  ${r?.referente || ""},`,
     ``,
