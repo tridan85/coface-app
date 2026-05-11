@@ -677,6 +677,216 @@ function getAgentEmail(r) {
 }
 
 /* ────────────────────────────────────────────────────────────── */
+/* Configurazione destinatari email per tipo cliente              */
+/* Aggiungi/modifica le entry per personalizzare CC/BCC per ogni  */
+/* cliente. Se un cliente non è in lista usa i valori DEFAULT.    */
+/* Per "agente"/"annullo" puoi sovrascrivere anche il campo "to"  */
+/* (array di email) per rimpiazzare il lookup automatico agente.  */
+/* Per "azienda" il TO è sempre l'email del record appuntamento.  */
+/* includeAgentInCc:true aggiunge l'email agente in cima al CC.   */
+/* ────────────────────────────────────────────────────────────── */
+const CLIENT_EMAIL_CONFIG = {
+  DEFAULT: {
+    agente: {
+      cc:  ["arturo.antacido@coface.com", "cofaceappuntamenti@apemo.net", "tlcoface@contaq.it"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+    azienda: {
+      includeAgentInCc: true,
+      cc:  ["arturo.antacido@coface.com"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+    annullo: {
+      cc:  ["arturo.antacido@coface.com"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+  },
+
+"Coface": {
+    agente: {
+      to:  [],
+      cc:  ["arturo.antacido@coface.com", "cofaceappuntamenti@apemo.net"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+    azienda: {
+      includeAgentInCc: false,
+      cc:  ["arturo.antacido@coface.com"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+    annullo: {
+      cc:  ["arturo.antacido@coface.com", "cofaceappuntamenti@apemo.net"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+  },
+
+  "Credit Partner": {
+    agente: { to: [], cc: [], bcc: [] },
+    azienda: { includeAgentInCc: false, cc: [], bcc: [] },
+    annullo: { cc: [], bcc: [] },
+  },
+
+  "Credit Solution": {
+    agente: {
+      to:  [],
+      cc:  ["mauro.mazzocchi@coface.it"],
+      bcc: ["tlcreditsolution@contaq.it"],
+    },
+    azienda: {
+      includeAgentInCc: false,
+      cc:  ["mauro.mazzocchi@coface.it"],
+      bcc: ["tlcreditsolution@contaq.it"],
+    },
+    annullo: {
+      cc:  ["mauro.mazzocchi@coface.it"],
+      bcc: ["tlcreditsolution@contaq.it"],
+    },
+  },
+
+  "Credito e Cauzioni": {
+    agente: {
+      to:  ["marcello@toscananord.it"],
+      cc:  [],
+      bcc: ["tlcreditoecauzionicoface@contaq.it"],
+    },
+    azienda: {
+      includeAgentInCc: false,
+      cc:  ["marcello@toscananord.it"],
+      bcc: ["tlcreditoecauzionicoface@contaq.it"],
+    },
+    annullo: {
+      cc:  ["marcello@toscananord.it"],
+      bcc: ["tlcreditoecauzionicoface@contaq.it"],
+    },
+  },
+
+  "Biella": {
+    agente: {
+      to:  ["franco.salodini@coface.it"],
+      cc:  [],
+      bcc: ["tlcofacebiella@contaq.it"],
+    },
+    azienda: {
+      includeAgentInCc: false,
+      cc:  ["franco.salodini@coface.it"],
+      bcc: ["tlcofacebiella@contaq.it"],
+    },
+    annullo: {
+      cc:  ["franco.salodini@coface.it"],
+      bcc: ["tlcofacebiella@contaq.it"],
+    },
+  },
+
+  "TCI CATANIA": {
+    agente: {
+      to:  ["sergio.rapisarda@coface.it"],
+      cc:  ["fabrizio.suriano@coface.it", "gianluigi.puci@coface.it", "gabriella.savoca@coface.com", "arturo.antacido@coface.com", "cofaceappuntamenti@apemo.net"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+    azienda: {
+      includeAgentInCc: false,
+      cc:  ["arturo.antacido@coface.com", "sergio.rapisarda@coface.it"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+    annullo: {
+      cc:  ["fabrizio.suriano@coface.it", "gianluigi.puci@coface.it", "gabriella.savoca@coface.com", "arturo.antacido@coface.com", "cofaceappuntamenti@apemo.net"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+  },
+
+  "TCI PADOVA": {
+    agente: {
+      to:  ["andrea.fabiani@coface.it"],
+      cc:  ["paolo.amenta@coface.it", "andrea.bottazzin@coface.it", "arturo.antacido@coface.com", "cofaceappuntamenti@apemo.net"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+    azienda: {
+      includeAgentInCc: false,
+      cc:  ["andrea.fabiani@coface.it", "arturo.antacido@coface.com"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+    annullo: {
+      cc:  ["paolo.amenta@coface.it", "andrea.bottazzin@coface.it", "arturo.antacido@coface.com", "cofaceappuntamenti@apemo.net"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+  },
+
+  "TCI MACERATA": {
+    agente: {
+      to:  ["david.pagnanelli@coface.it"],
+      cc:  ["tania.pieroni@coface.it", "gabriella.savoca@coface.com", "eleonora.cardini@coface.it", "arturo.antacido@coface.com", "cofaceappuntamenti@apemo.net"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+    azienda: {
+      includeAgentInCc: false,
+      cc:  ["david.pagnanelli@coface.it", "arturo.antacido@coface.com"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+    annullo: {
+      cc:  ["tania.pieroni@coface.it", "gabriella.savoca@coface.com", "eleonora.cardini@coface.it", "arturo.antacido@coface.com", "cofaceappuntamenti@apemo.net"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+  },
+
+  "TCI MILANO 4": {
+    agente: {
+      to:  ["guido.mauri@coface.it"],
+      cc:  ["cesare.mola@coface.com", "fabio.scravaglieri@coface.it", "arturo.antacido@coface.com", "cofaceappuntamenti@apemo.net"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+    azienda: {
+      includeAgentInCc: false,
+      cc:  ["guido.mauri@coface.it", "arturo.antacido@coface.com"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+    annullo: {
+      cc:  ["cesare.mola@coface.com", "fabio.scravaglieri@coface.it", "arturo.antacido@coface.com", "cofaceappuntamenti@apemo.net"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+  },
+
+  "TCI BRESCIA 2": {
+    agente: {
+      to:  ["giovanni.renaldini@coface.it"],
+      cc:  ["cesare.mola@coface.com", "simone.modonesi@coface.it", "arturo.antacido@coface.com", "cofaceappuntamenti@apemo.net"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+    azienda: {
+      includeAgentInCc: false,
+      cc:  ["giovanni.renaldini@coface.it", "arturo.antacido@coface.com"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+    annullo: {
+      cc:  ["cesare.mola@coface.com", "simone.modonesi@coface.it", "arturo.antacido@coface.com", "cofaceappuntamenti@apemo.net"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+  },
+
+  "TCI NAPOLI": {
+    agente: {
+      to:  ["carlo.balnelli@coface.it"],
+      cc:  ["katia.balnelli@coface.it", "gabriella.balnelli@coface.it", "arturo.antacido@coface.com", "cofaceappuntamenti@apemo.net"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+    azienda: {
+      includeAgentInCc: false,
+      cc:  ["carlo.balnelli@coface.it", "arturo.antacido@coface.com"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+    annullo: {
+      cc:  ["katia.balnelli@coface.it", "gabriella.balnelli@coface.it", "arturo.antacido@coface.com", "cofaceappuntamenti@apemo.net"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+  },
+};
+
+function getClientEmailCfg(r, type) {
+  const key = String(r?.cliente || "").trim();
+  const clientCfg = CLIENT_EMAIL_CONFIG[key];
+  return (clientCfg && clientCfg[type] !== undefined)
+    ? clientCfg[type]
+    : CLIENT_EMAIL_CONFIG.DEFAULT[type];
+}
+/* ────────────────────────────────────────────────────────────── */
 /* Email sent flags (persistenza locale via localStorage)         */
 /* ────────────────────────────────────────────────────────────── */
 function emailSentKey(type, id) {
