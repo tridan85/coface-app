@@ -677,6 +677,101 @@ function getAgentEmail(r) {
 }
 
 /* ────────────────────────────────────────────────────────────── */
+/* Configurazione destinatari email per tipo cliente              */
+/* Aggiungi/modifica le entry per personalizzare CC/BCC per ogni  */
+/* cliente. Se un cliente non è in lista usa i valori DEFAULT.    */
+/* Per "agente"/"annullo" puoi sovrascrivere anche il campo "to"  */
+/* (array di email) per rimpiazzare il lookup automatico agente.  */
+/* Per "azienda" il TO è sempre l'email del record appuntamento.  */
+/* includeAgentInCc:true aggiunge l'email agente in cima al CC.   */
+/* ────────────────────────────────────────────────────────────── */
+const CLIENT_EMAIL_CONFIG = {
+  DEFAULT: {
+    agente: {
+      cc:  ["arturo.antacido@coface.com", "cofaceappuntamenti@apemo.net", "tlcoface@contaq.it"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+    azienda: {
+      includeAgentInCc: true,
+      cc:  ["arturo.antacido@coface.com"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+    annullo: {
+      cc:  ["arturo.antacido@coface.com"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+  },
+
+  "TCI PADOVA": {
+    agente: {
+      to:  ["andrea.fabiani@coface.it", "andrea.bottazzin@coface.it"],
+      cc:  ["paolo.amenta@coface.it", "Ivan.Ciociano@coface.it", "cristian.annovazzi@coface.com", "arturo.antacido@coface.com", "cofaceappuntamenti@apemo.net"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+    azienda: {
+      includeAgentInCc: false,
+      cc:  ["andrea.fabiani@coface.it", "andrea.bottazzin@coface.it", "arturo.antacido@coface.com"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+    annullo: {
+      cc:  ["arturo.antacido@coface.com"],
+      bcc: ["tlcoface@contaq.it"],
+    },
+  },
+
+  "TCI BRESCIA 2": {
+    // Personalizza qui i destinatari per TCI BRESCIA 2
+    // agente: { to: ["nome@coface.it"], cc: [...], bcc: [...] },
+    // azienda: { includeAgentInCc: true, cc: [...], bcc: [...] },
+    // annullo: { cc: [...], bcc: [...] },
+  },
+
+  "TCI MILANO 4": {
+    // Personalizza qui i destinatari per TCI MILANO 4
+  },
+
+  "TCI MACERATA": {
+    // Personalizza qui i destinatari per TCI MACERATA
+  },
+
+  "TCI CATANIA": {
+    // Personalizza qui i destinatari per TCI CATANIA
+  },
+
+  "Credit Partner": {
+    // Personalizza qui i destinatari per Credit Partner
+  },
+
+  "Credit Solution": {
+    // Personalizza qui i destinatari per Credit Solution
+  },
+
+  "General Service": {
+    // Personalizza qui i destinatari per General Service
+  },
+
+  "Credito e Cauzioni": {
+    // Personalizza qui i destinatari per Credito e Cauzioni
+  },
+
+  "Satispay": {
+    // Personalizza qui i destinatari per Satispay
+  },
+
+  "Coface": {
+    // Personalizza qui i destinatari per Coface (interno)
+  },
+};
+
+function getClientEmailCfg(r, type) {
+  const key = String(r?.cliente || "").trim();
+  const clientCfg = CLIENT_EMAIL_CONFIG[key];
+  return (clientCfg && clientCfg[type] !== undefined)
+    ? clientCfg[type]
+    : CLIENT_EMAIL_CONFIG.DEFAULT[type];
+}
+
+/* ────────────────────────────────────────────────────────────── */
 /* Email sent flags (persistenza locale via localStorage)         */
 /* ────────────────────────────────────────────────────────────── */
 function emailSentKey(type, id) {
