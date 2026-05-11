@@ -871,7 +871,7 @@ function markEmailSent(type, id) {
 /* ────────────────────────────────────────────────────────────── */
 function makeEmailAgente(r) {
   const dataGGMM = fmtDate(r?.data);
-  const subject = `Notifica appuntamento Coface - ${dataGGMM} alle ore ${r?.ora || ""} - ${r?.azienda || ""}`;
+  const subject = `Appuntamento telemarketing - Notifica appuntamento Coface - ${dataGGMM} alle ore ${r?.ora || ""} - ${r?.azienda || ""}`;
   const body = [
     `Gentile ${r?.agente || ""},`,
     ``,
