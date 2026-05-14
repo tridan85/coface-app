@@ -63,6 +63,7 @@ const CLIENTI_CANONICI = [
   "TCI CATANIA",
   "Credito e Cauzioni",
   "Satispay",   // ✅ nuovo cliente
+  "Brainsure Athlon",
 ];
 
 
@@ -835,6 +836,12 @@ const CLIENT_EMAIL_CONFIG = {
       cc:  ["katia.balnelli@coface.it", "gabriella.balnelli@coface.it", "arturo.antacido@coface.com", "cofaceappuntamenti@apemo.net"],
       bcc: ["tlcoface@contaq.it"],
     },
+  },
+
+  "Brainsure Athlon": {
+    agente:  { to: [], cc: [], bcc: [] },
+    azienda: { includeAgentInCc: false, cc: [], bcc: [] },
+    annullo: { cc: [], bcc: [] },
   },
 };
 
