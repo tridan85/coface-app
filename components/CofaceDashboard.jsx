@@ -64,6 +64,7 @@ const CLIENTI_CANONICI = [
   "Credito e Cauzioni",
   "Satispay",   // ✅ nuovo cliente
   "Brainsure Athlon",
+  "PLUXEE",
 ];
 
 
@@ -839,6 +840,12 @@ const CLIENT_EMAIL_CONFIG = {
   },
 
   "Brainsure Athlon": {
+    agente:  { to: [], cc: [], bcc: [] },
+    azienda: { includeAgentInCc: false, cc: [], bcc: [] },
+    annullo: { cc: [], bcc: [] },
+  },
+
+  "PLUXEE": {
     agente:  { to: [], cc: [], bcc: [] },
     azienda: { includeAgentInCc: false, cc: [], bcc: [] },
     annullo: { cc: [], bcc: [] },
