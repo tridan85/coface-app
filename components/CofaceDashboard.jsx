@@ -65,6 +65,7 @@ const CLIENTI_CANONICI = [
   "Satispay",   // ✅ nuovo cliente
   "Brainsure Athlon",
   "PLUXEE",
+  "IRMA",
 ];
 
 
@@ -846,6 +847,12 @@ const CLIENT_EMAIL_CONFIG = {
   },
 
   "PLUXEE": {
+    agente:  { to: [], cc: [], bcc: [] },
+    azienda: { includeAgentInCc: false, cc: [], bcc: [] },
+    annullo: { cc: [], bcc: [] },
+  },
+
+  "IRMA": {
     agente:  { to: [], cc: [], bcc: [] },
     azienda: { includeAgentInCc: false, cc: [], bcc: [] },
     annullo: { cc: [], bcc: [] },

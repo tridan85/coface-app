@@ -115,6 +115,7 @@ const CLIENTI_CANONICI = [
   "DIE",
   "PLUXEE",
   "Brainsure Athlon",
+  "IRMA",
 ];
 
 /* ====== Normalizzazione & Fuzzy-matching agenti ====== */
