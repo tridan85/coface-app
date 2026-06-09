@@ -66,6 +66,7 @@ const CLIENTI_CANONICI = [
   "Brainsure Athlon",
   "PLUXEE",
   "IRMA",
+  "Aron Nebuloni",
 ];
 
 
@@ -853,6 +854,12 @@ const CLIENT_EMAIL_CONFIG = {
   },
 
   "IRMA": {
+    agente:  { to: [], cc: [], bcc: [] },
+    azienda: { includeAgentInCc: false, cc: [], bcc: [] },
+    annullo: { cc: [], bcc: [] },
+  },
+
+  "Aron Nebuloni": {
     agente:  { to: [], cc: [], bcc: [] },
     azienda: { includeAgentInCc: false, cc: [], bcc: [] },
     annullo: { cc: [], bcc: [] },
