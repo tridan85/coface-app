@@ -71,7 +71,7 @@ const CLIENTI_CANONICI = [
 
 
 const CLEAR_ALL_PASSWORD = "Password.2";
-const EDIT_PASSWORD = "123"; // ⬅️ password operativa per modifiche/annulli/cancellazioni
+const EDIT_PASSWORD = "ContaQ2026"; // ⬅️ password operativa per modifiche/annulli/cancellazioni
 
 // Normalizza un nome agente per confronti coerenti (spazi + Title Case)
 function normalizeAgentName(s = "") {
@@ -4012,7 +4012,7 @@ function markRecupero(r) {
 
       <p className="text-xs opacity-60">
         Dati condivisi tramite Supabase (Postgres + Realtime). Import/Export Excel,
-        CSV/Excel fatturazione, password per modifiche “123”, cancellazione protetta.
+        CSV/Excel fatturazione, cancellazione protetta.
       </p>
 
       {/* Modale editor – usa funzioni protette */}
