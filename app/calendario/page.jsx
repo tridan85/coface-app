@@ -117,6 +117,7 @@ const CLIENTI_CANONICI = [
   "Brainsure Athlon",
   "IRMA",
   "Aron Nebuloni",
+  "SACE BT",
 ];
 
 /* ====== Normalizzazione & Fuzzy-matching agenti ====== */

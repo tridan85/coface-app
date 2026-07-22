@@ -67,6 +67,7 @@ const CLIENTI_CANONICI = [
   "PLUXEE",
   "IRMA",
   "Aron Nebuloni",
+  "SACE BT",
 ];
 
 
@@ -860,6 +861,12 @@ const CLIENT_EMAIL_CONFIG = {
   },
 
   "Aron Nebuloni": {
+    agente:  { to: [], cc: [], bcc: [] },
+    azienda: { includeAgentInCc: false, cc: [], bcc: [] },
+    annullo: { cc: [], bcc: [] },
+  },
+
+  "SACE BT": {
     agente:  { to: [], cc: [], bcc: [] },
     azienda: { includeAgentInCc: false, cc: [], bcc: [] },
     annullo: { cc: [], bcc: [] },
