@@ -68,6 +68,8 @@ const CLIENTI_CANONICI = [
   "IRMA",
   "Aron Nebuloni",
   "SACE BT",
+  "VIVA ASSICURA",
+  "UNIPOL FFD",
 ];
 
 
@@ -867,6 +869,18 @@ const CLIENT_EMAIL_CONFIG = {
   },
 
   "SACE BT": {
+    agente:  { to: [], cc: [], bcc: [] },
+    azienda: { includeAgentInCc: false, cc: [], bcc: [] },
+    annullo: { cc: [], bcc: [] },
+  },
+
+  "VIVA ASSICURA": {
+    agente:  { to: [], cc: [], bcc: [] },
+    azienda: { includeAgentInCc: false, cc: [], bcc: [] },
+    annullo: { cc: [], bcc: [] },
+  },
+
+  "UNIPOL FFD": {
     agente:  { to: [], cc: [], bcc: [] },
     azienda: { includeAgentInCc: false, cc: [], bcc: [] },
     annullo: { cc: [], bcc: [] },

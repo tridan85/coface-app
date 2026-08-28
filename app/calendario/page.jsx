@@ -118,6 +118,8 @@ const CLIENTI_CANONICI = [
   "IRMA",
   "Aron Nebuloni",
   "SACE BT",
+  "VIVA ASSICURA",
+  "UNIPOL FFD",
 ];
 
 /* ====== Normalizzazione & Fuzzy-matching agenti ====== */
