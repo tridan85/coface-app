@@ -70,6 +70,7 @@ const CLIENTI_CANONICI = [
   "SACE BT",
   "VIVA ASSICURA",
   "UNIPOL FFD",
+  "Coface Pescara",
 ];
 
 
@@ -881,6 +882,12 @@ const CLIENT_EMAIL_CONFIG = {
   },
 
   "UNIPOL FFD": {
+    agente:  { to: [], cc: [], bcc: [] },
+    azienda: { includeAgentInCc: false, cc: [], bcc: [] },
+    annullo: { cc: [], bcc: [] },
+  },
+
+  "Coface Pescara": {
     agente:  { to: [], cc: [], bcc: [] },
     azienda: { includeAgentInCc: false, cc: [], bcc: [] },
     annullo: { cc: [], bcc: [] },

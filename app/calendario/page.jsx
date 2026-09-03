@@ -120,6 +120,7 @@ const CLIENTI_CANONICI = [
   "SACE BT",
   "VIVA ASSICURA",
   "UNIPOL FFD",
+  "Coface Pescara",
 ];
 
 /* ====== Normalizzazione & Fuzzy-matching agenti ====== */
