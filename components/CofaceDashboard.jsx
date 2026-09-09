@@ -57,6 +57,7 @@ const CLIENTI_CANONICI = [
   "Credit Solution",
   "General Service",
   "TCI PADOVA",
+  "TCI BRESCIA 1",
   "TCI BRESCIA 2",
   "TCI MILANO 4",
   "TCI MACERATA",
@@ -520,6 +521,7 @@ function openEmail({ to, cc, bcc, subject, body }) {
 // ---- TCI CAPACITY: costanti + helper ----
 export const TCI_CLIENTI = [
   "TCI PADOVA",
+  "TCI BRESCIA 1",
   "TCI BRESCIA 2",
   "TCI MILANO 4",
   "TCI MACERATA",
@@ -2712,6 +2714,7 @@ function TciWeeklyCapacityCard({ rows, target = 4 }) {
 
     const TCI_CLIENTI = [
       "TCI PADOVA",
+      "TCI BRESCIA 1",
       "TCI BRESCIA 2",
       "TCI MILANO 4",
       "TCI MACERATA",

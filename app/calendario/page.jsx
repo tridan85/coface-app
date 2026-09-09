@@ -103,6 +103,7 @@ const CLIENTI_CANONICI = [
   "Credit Solution",
   "General Service",
   "TCI PADOVA",
+  "TCI BRESCIA 1",
   "TCI BRESCIA 2",
   "TCI MILANO 4",
   "TCI MACERATA",
