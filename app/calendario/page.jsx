@@ -122,6 +122,7 @@ const CLIENTI_CANONICI = [
   "VIVA ASSICURA",
   "UNIPOL FFD",
   "Coface Pescara",
+  "Verlingue",
 ];
 
 /* ====== Normalizzazione & Fuzzy-matching agenti ====== */

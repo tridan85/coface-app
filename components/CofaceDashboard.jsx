@@ -72,6 +72,7 @@ const CLIENTI_CANONICI = [
   "VIVA ASSICURA",
   "UNIPOL FFD",
   "Coface Pescara",
+  "Verlingue",
 ];
 
 
@@ -890,6 +891,12 @@ const CLIENT_EMAIL_CONFIG = {
   },
 
   "Coface Pescara": {
+    agente:  { to: [], cc: [], bcc: [] },
+    azienda: { includeAgentInCc: false, cc: [], bcc: [] },
+    annullo: { cc: [], bcc: [] },
+  },
+
+  "Verlingue": {
     agente:  { to: [], cc: [], bcc: [] },
     azienda: { includeAgentInCc: false, cc: [], bcc: [] },
     annullo: { cc: [], bcc: [] },
