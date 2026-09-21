@@ -66,6 +66,11 @@ const CLIENTI_CANONICI = [
   "TCI GENOVA",
   "Credito e Cauzioni",
   "Satispay",   // ✅ nuovo cliente
+  "ASSICOOP",
+  "GENERALI",
+  "Biella",
+  "ASSIPIACENZA",
+  "DIE",
   "Brainsure Athlon",
   "PLUXEE",
   "IRMA",

@@ -110,6 +110,7 @@ const CLIENTI_CANONICI = [
   "TCI CATANIA",
   "TCI NAPOLI",
   "TCI GENOVA",
+  "Credito e Cauzioni",
   "Satispay",
   "ASSICOOP",
   "GENERALI",
