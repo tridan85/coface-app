@@ -80,6 +80,7 @@ const CLIENTI_CANONICI = [
   "UNIPOL FFD",
   "Coface Pescara",
   "Verlingue",
+  "Fusco Cribis",
 ];
 
 
@@ -906,6 +907,12 @@ const CLIENT_EMAIL_CONFIG = {
   },
 
   "Verlingue": {
+    agente:  { to: [], cc: [], bcc: [] },
+    azienda: { includeAgentInCc: false, cc: [], bcc: [] },
+    annullo: { cc: [], bcc: [] },
+  },
+
+  "Fusco Cribis": {
     agente:  { to: [], cc: [], bcc: [] },
     azienda: { includeAgentInCc: false, cc: [], bcc: [] },
     annullo: { cc: [], bcc: [] },

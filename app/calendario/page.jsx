@@ -126,6 +126,7 @@ const CLIENTI_CANONICI = [
   "UNIPOL FFD",
   "Coface Pescara",
   "Verlingue",
+  "Fusco Cribis",
 ];
 
 /* ====== Normalizzazione & Fuzzy-matching agenti ====== */
