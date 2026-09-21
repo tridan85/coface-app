@@ -62,6 +62,8 @@ const CLIENTI_CANONICI = [
   "TCI MILANO 4",
   "TCI MACERATA",
   "TCI CATANIA",
+  "TCI NAPOLI",
+  "TCI GENOVA",
   "Credito e Cauzioni",
   "Satispay",   // ✅ nuovo cliente
   "Brainsure Athlon",
@@ -527,6 +529,8 @@ export const TCI_CLIENTI = [
   "TCI MILANO 4",
   "TCI MACERATA",
   "TCI CATANIA",
+  "TCI NAPOLI",
+  "TCI GENOVA",
 ];
 
 // normalizza stringhe per confronti robusti
@@ -2726,6 +2730,8 @@ function TciWeeklyCapacityCard({ rows, target = 4 }) {
       "TCI MILANO 4",
       "TCI MACERATA",
       "TCI CATANIA",
+      "TCI NAPOLI",
+      "TCI GENOVA",
     ];
 
     // Conteggio appuntamenti per settimana (da data appuntamento)
