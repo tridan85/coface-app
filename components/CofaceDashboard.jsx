@@ -81,6 +81,7 @@ const CLIENTI_CANONICI = [
   "Coface Pescara",
   "Verlingue",
   "Fusco Cribis",
+  "Allianz 231",
 ];
 
 
@@ -913,6 +914,12 @@ const CLIENT_EMAIL_CONFIG = {
   },
 
   "Fusco Cribis": {
+    agente:  { to: [], cc: [], bcc: [] },
+    azienda: { includeAgentInCc: false, cc: [], bcc: [] },
+    annullo: { cc: [], bcc: [] },
+  },
+
+  "Allianz 231": {
     agente:  { to: [], cc: [], bcc: [] },
     azienda: { includeAgentInCc: false, cc: [], bcc: [] },
     annullo: { cc: [], bcc: [] },
