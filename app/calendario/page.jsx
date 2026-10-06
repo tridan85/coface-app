@@ -128,6 +128,7 @@ const CLIENTI_CANONICI = [
   "Verlingue",
   "Fusco Cribis",
   "Allianz 231",
+  "AON",
 ];
 
 /* ====== Normalizzazione & Fuzzy-matching agenti ====== */

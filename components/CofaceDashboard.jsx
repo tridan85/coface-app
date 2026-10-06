@@ -82,6 +82,7 @@ const CLIENTI_CANONICI = [
   "Verlingue",
   "Fusco Cribis",
   "Allianz 231",
+  "AON",
 ];
 
 
@@ -920,6 +921,12 @@ const CLIENT_EMAIL_CONFIG = {
   },
 
   "Allianz 231": {
+    agente:  { to: [], cc: [], bcc: [] },
+    azienda: { includeAgentInCc: false, cc: [], bcc: [] },
+    annullo: { cc: [], bcc: [] },
+  },
+
+  "AON": {
     agente:  { to: [], cc: [], bcc: [] },
     azienda: { includeAgentInCc: false, cc: [], bcc: [] },
     annullo: { cc: [], bcc: [] },
