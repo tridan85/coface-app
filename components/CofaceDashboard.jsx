@@ -1025,7 +1025,7 @@ function makeEmailAzienda(r) {
     ``,
     `Customer Success Specialist`,
     ``,
-    `Numero Verde: 800 600 880`,
+    `02 48335111`,
   ].join("\n");
 
   const cfg = getClientEmailCfg(r, "azienda");
