@@ -83,6 +83,7 @@ const CLIENTI_CANONICI = [
   "Fusco Cribis",
   "Allianz 231",
   "AON",
+  "Taliani Cribis",
 ];
 
 
@@ -927,6 +928,12 @@ const CLIENT_EMAIL_CONFIG = {
   },
 
   "AON": {
+    agente:  { to: [], cc: [], bcc: [] },
+    azienda: { includeAgentInCc: false, cc: [], bcc: [] },
+    annullo: { cc: [], bcc: [] },
+  },
+
+  "Taliani Cribis": {
     agente:  { to: [], cc: [], bcc: [] },
     azienda: { includeAgentInCc: false, cc: [], bcc: [] },
     annullo: { cc: [], bcc: [] },
