@@ -1005,10 +1005,11 @@ function makeEmailAgente(r) {
 function makeEmailAzienda(r) {
   const dataGGMM = fmtDate(r?.data); // formato gg/mm/aaaa
   const subject = `Conferma appuntamento Coface - ${dataGGMM} alle ore ${r?.ora || ""} - ${r?.azienda || ""}`;
+  const ruoloAgente = isTciCliente(r?.cliente) ? "Agente Generale" : "Sales Account";
   const body = [
     `Gentile  ${r?.referente || ""},`,
     ``,
-    `La presente per confermare l' appuntamento ${tipoLabel(r)}, per il giorno ${dataGGMM} alle ore ${r?.ora || ""} con il nostro Sales Account ${r?.agente || ""}`,
+    `La presente per confermare l' appuntamento ${tipoLabel(r)}, per il giorno ${dataGGMM} alle ore ${r?.ora || ""} con il nostro ${ruoloAgente} ${r?.agente || ""}`,
     ``,
     `Di seguito una breve sintesi delle soluzioni COFACE che permettono di:`,
     ``,
