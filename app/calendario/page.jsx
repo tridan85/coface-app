@@ -131,6 +131,7 @@ const CLIENTI_CANONICI = [
   "AON",
   "Taliani Cribis",
   "Mastracci Cribis",
+  "Alfa Ambiente",
 ];
 
 /* ====== Normalizzazione & Fuzzy-matching agenti ====== */

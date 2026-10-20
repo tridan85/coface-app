@@ -85,6 +85,7 @@ const CLIENTI_CANONICI = [
   "AON",
   "Taliani Cribis",
   "Mastracci Cribis",
+  "Alfa Ambiente",
 ];
 
 
@@ -941,6 +942,12 @@ const CLIENT_EMAIL_CONFIG = {
   },
 
   "Mastracci Cribis": {
+    agente:  { to: [], cc: [], bcc: [] },
+    azienda: { includeAgentInCc: false, cc: [], bcc: [] },
+    annullo: { cc: [], bcc: [] },
+  },
+
+  "Alfa Ambiente": {
     agente:  { to: [], cc: [], bcc: [] },
     azienda: { includeAgentInCc: false, cc: [], bcc: [] },
     annullo: { cc: [], bcc: [] },
