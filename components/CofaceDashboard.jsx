@@ -949,7 +949,7 @@ const CLIENT_EMAIL_CONFIG = {
 
   "Alfa Ambiente": {
     agente:  { to: [], cc: [], bcc: [] },
-    azienda: { includeAgentInCc: false, cc: [], bcc: [] },
+    azienda: { includeAgentInCc: false, cc: ["viola@alfaambiente.it"], bcc: ["tlalfa@contaq.it"] },
     annullo: { cc: [], bcc: [] },
   },
 };
@@ -1016,7 +1016,36 @@ function makeEmailAgente(r) {
 }
 
 
+// Email conferma dedicata ad Alfa Ambiente (testo fornito dal cliente)
+function makeEmailAziendaAlfaAmbiente(r) {
+  const dataGGMM = fmtDate(r?.data);
+  const subject = `Conferma Appuntamento Alfa Ambiente - ${dataGGMM} alle ore ${r?.ora || ""} - ${r?.azienda || ""}`;
+  const body = [
+    `Egr. Ing. ${r?.referente || ""}`,
+    ``,
+    `La ringraziamo anzitutto per il tempo che ci ha dedicato`,
+    ``,
+    `In allegato può trovare la nostra presentazione.`,
+    ``,
+    `Le confermo l'appuntamento in videoconferenza per il giorno ${dataGGMM} alle ore ${r?.ora || ""}`,
+    ``,
+    `Riceverà a breve il link per il collegamento.`,
+    ``,
+    `Cordiali saluti`,
+    ``,
+    `Servizio Marketing`,
+    ``,
+    `06-5410521`,
+  ].join("\n");
+
+  const cfg = getClientEmailCfg(r, "azienda");
+  return { to: r?.email || "", cc: cfg.cc, bcc: cfg.bcc, subject, body };
+}
+
 function makeEmailAzienda(r) {
+  if (String(r?.cliente || "").trim().toLowerCase() === "alfa ambiente") {
+    return makeEmailAziendaAlfaAmbiente(r);
+  }
   const dataGGMM = fmtDate(r?.data); // formato gg/mm/aaaa
   const subject = `Conferma appuntamento Coface - ${dataGGMM} alle ore ${r?.ora || ""} - ${r?.azienda || ""}`;
   const ruoloAgente = isTciCliente(r?.cliente) ? "Agente Generale" : "Sales Account";
