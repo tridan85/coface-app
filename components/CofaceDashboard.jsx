@@ -86,6 +86,7 @@ const CLIENTI_CANONICI = [
   "Taliani Cribis",
   "Mastracci Cribis",
   "Alfa Ambiente",
+  "Coface Varese",
 ];
 
 
@@ -950,6 +951,12 @@ const CLIENT_EMAIL_CONFIG = {
   "Alfa Ambiente": {
     agente:  { to: [], cc: [], bcc: [] },
     azienda: { includeAgentInCc: false, cc: ["viola@alfaambiente.it"], bcc: ["tlalfa@contaq.it"] },
+    annullo: { cc: [], bcc: [] },
+  },
+
+  "Coface Varese": {
+    agente:  { to: [], cc: [], bcc: [] },
+    azienda: { includeAgentInCc: false, cc: [], bcc: [] },
     annullo: { cc: [], bcc: [] },
   },
 };
