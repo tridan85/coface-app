@@ -405,6 +405,7 @@ const toNull = (v) => (v === "" || v === undefined ? null : v);
 
 // Scarica tutto il DB a pagine da 1000 (Supabase restituisce max 1000 righe per richiesta)
 async function fetchAllAppointmentsPaged(pageSize = 1000) {
+  const supabase = getSupabaseClient();
   let from = 0;
   const all = [];
   for (;;) {
