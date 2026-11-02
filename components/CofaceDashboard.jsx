@@ -403,15 +403,17 @@ const toNull = (v) => (v === "" || v === undefined ? null : v);
     return out;
   }
 
-// Scarica tutto il DB a pagine da 1000
+// Scarica tutto il DB a pagine da 1000 (Supabase restituisce max 1000 righe per richiesta)
 async function fetchAllAppointmentsPaged(pageSize = 1000) {
   let from = 0;
   const all = [];
   for (;;) {
     const { data, error } = await supabase
-      .from("appuntamenti")
+      .from("appointments")
       .select("*")
-      .order("id", { ascending: true }) // ordina per chiave stabile
+      .order("dataInserimento", { ascending: false }) // più recenti prima
+      .order("oraInserimento",  { ascending: false })
+      .order("id", { ascending: true })               // chiave stabile per la paginazione
       .range(from, from + pageSize - 1);
 
     if (error) throw error;
@@ -3002,28 +3004,10 @@ export default function CofaceAppuntamentiDashboard() {
     // 1) Primo fetch: TUTTO lo storico (nessun filtro)
     const refresh = async () => {
       try {
-      const { data, error } = await supabase
-        .from("appointments")
-        .select("*")
-        .order("dataInserimento", { ascending: false })   // più recenti prima
-        .order("oraInserimento",  { ascending: false })   // più recenti prima
-        .range(0, 1999);                                  // prendi fino a 2000 righe
-
-        // DEBUG: rimuovi quando hai finito
-        console.log(
-          "FETCH rows:",
-          data?.length,
-          "esempi:",
-          (data || []).slice(0, 5).map((r) => r.id)
-        );
-
+        // tutto lo storico, a pagine (una singola richiesta è limitata a 1000 righe)
+        const all = await fetchAllAppointmentsPaged(1000);
         if (!mounted) return;
-        if (error != null && (error.message || error.code)) {
-          console.error("Select error:", error);
-          alert("Errore lettura appuntamenti: " + (error.message || error.code));
-          return;
-        }
-        setRows((data ?? []).map(rowFromDb));
+        setRows(all);
       } catch (e) {
         console.error("Select failed:", e);
         alert("Errore lettura appuntamenti: " + (e?.message || e));
@@ -3657,8 +3641,7 @@ function markRecupero(r) {
       });
 
       await supabase.from("appointments").upsert(mapped, { onConflict: "id" });
-      const { data: data2 } = await supabase.from("appointments").select("*");
-      setRows((data2 || []).map(rowFromDb));
+      setRows(await fetchAllAppointmentsPaged(1000));
     };
     reader.readAsArrayBuffer(file);
   }
