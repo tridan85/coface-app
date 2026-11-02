@@ -953,7 +953,7 @@ const CLIENT_EMAIL_CONFIG = {
 
   "Alfa Ambiente": {
     agente:  { to: [], cc: [], bcc: [] },
-    azienda: { includeAgentInCc: false, cc: ["viola@alfaambiente.it"], bcc: ["tlalfa@contaq.it"] },
+    azienda: { includeAgentInCc: false, cc: ["viola@alfambiente.it"], bcc: ["tlalfa@contaq.it"] },
     annullo: { cc: [], bcc: [] },
   },
 
