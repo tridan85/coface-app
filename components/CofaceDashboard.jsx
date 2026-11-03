@@ -958,8 +958,16 @@ const CLIENT_EMAIL_CONFIG = {
   },
 
   "Coface Varese": {
-    agente:  { to: [], cc: [], bcc: [] },
-    azienda: { includeAgentInCc: false, cc: [], bcc: [] },
+    agente: {
+      to:  ["carlo.piccinno@coface.it"],
+      cc:  ["giancarlo.piccinno@coface.it", "andrea.piccinno@coface.it"],
+      bcc: [],
+    },
+    azienda: {
+      includeAgentInCc: false,
+      cc:  ["carlo.piccinno@coface.it"],
+      bcc: [],
+    },
     annullo: { cc: [], bcc: [] },
   },
 };
