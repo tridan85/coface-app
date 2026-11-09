@@ -87,6 +87,7 @@ const CLIENTI_CANONICI = [
   "Mastracci Cribis",
   "Alfa Ambiente",
   "Coface Varese",
+  "Coface Udine",
 ];
 
 
@@ -970,6 +971,23 @@ const CLIENT_EMAIL_CONFIG = {
     },
     annullo: { cc: [], bcc: [] },
   },
+
+  "Coface Udine": {
+    agente: {
+      to:  [],
+      cc:  ["diego.dagiau@coface.it", "thiago.urbani@coface.it"],
+      bcc: ["TLCofaceAssicredit@contaq.it"],
+    },
+    azienda: {
+      includeAgentInCc: false,
+      cc:  ["diego.dagiau@coface.it", "thiago.urbani@coface.it"],
+      bcc: ["TLCofaceAssicredit@contaq.it"],
+    },
+    annullo: {
+      cc:  ["diego.dagiau@coface.it", "thiago.urbani@coface.it"],
+      bcc: ["TLCofaceAssicredit@contaq.it"],
+    },
+  },
 };
 
 
@@ -1004,8 +1022,11 @@ function markEmailSent(type, id) {
 /* Template email                                                 */
 /* ────────────────────────────────────────────────────────────── */
 function makeEmailAgente(r) {
+  const isUdine = String(r?.cliente || "").trim().toLowerCase() === "coface udine";
   const dataGGMM = fmtDate(r?.data);
-  const subject = `Appuntamento telemarketing - Notifica appuntamento Coface - ${dataGGMM} alle ore ${r?.ora || ""} - ${r?.azienda || ""}`;
+  const subject = isUdine
+    ? `Appuntamento telemarketing - Notifica appuntamento Coface`
+    : `Appuntamento telemarketing - Notifica appuntamento Coface - ${dataGGMM} alle ore ${r?.ora || ""} - ${r?.azienda || ""}`;
   const body = [
     `Gentile ${r?.agente || ""},`,
     ``,
@@ -1022,7 +1043,7 @@ function makeEmailAgente(r) {
     `NOTE: ${r?.note || ""}`,
     ``,
     `Buon lavoro`,
-    `${r?.operatore || ""}`,
+    ...(isUdine ? [] : [`${r?.operatore || ""}`]),
   ].join("\n");
 
   const cfg = getClientEmailCfg(r, "agente");
@@ -1060,9 +1081,38 @@ function makeEmailAziendaAlfaAmbiente(r) {
   return { to: r?.email || "", cc: cfg.cc, bcc: cfg.bcc, subject, body };
 }
 
+// Email conferma dedicata a Coface Udine (testo fornito dal cliente)
+function makeEmailAziendaCofaceUdine(r) {
+  const dataGGMM = fmtDate(r?.data);
+  const subject = `Conferma appuntamento Coface`;
+  const body = [
+    `Gentile ${r?.referente || ""},`,
+    ``,
+    `La presente per confermare l' appuntamento in videocall, per il giorno ${dataGGMM} alle ore ${r?.ora || ""} con il nostro Agente Generale Diego Da Giau`,
+    ``,
+    `Di seguito una breve sintesi delle soluzioni COFACE che permettono di:`,
+    ``,
+    `- Richiedere informazioni complete in tutto il mondo in tempo reale utili per chi fa export, a condizioni molto competitive`,
+    `- Confrontare i fidi dei provider di informazioni con quelli assicurativi Coface`,
+    `- Sapere se i clienti hanno avuto sinistri o sono assicurati`,
+    `- Conoscere il fido assicurativo e monitorarlo per essere tempestivamente avvisati in caso di revoca fidi Valutare i fidi e affidabilità dei fornitori strategici in Italia e nel mondo`,
+    ``,
+    `Sarà nostra cura contattarla qualche giorno prima per confermare o riprogrammare la data dell'incontro.`,
+    ``,
+    `La ringraziamo per il tempo che ci ha dedicato e le inviamo un cordiale saluto.`,
+  ].join("\n");
+
+  const cfg = getClientEmailCfg(r, "azienda");
+  return { to: r?.email || "", cc: cfg.cc, bcc: cfg.bcc, subject, body };
+}
+
 function makeEmailAzienda(r) {
-  if (String(r?.cliente || "").trim().toLowerCase() === "alfa ambiente") {
+  const clienteKey = String(r?.cliente || "").trim().toLowerCase();
+  if (clienteKey === "alfa ambiente") {
     return makeEmailAziendaAlfaAmbiente(r);
+  }
+  if (clienteKey === "coface udine") {
+    return makeEmailAziendaCofaceUdine(r);
   }
   const dataGGMM = fmtDate(r?.data); // formato gg/mm/aaaa
   const subject = `Conferma appuntamento Coface - ${dataGGMM} alle ore ${r?.ora || ""} - ${r?.azienda || ""}`;
