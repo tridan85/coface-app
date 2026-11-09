@@ -960,13 +960,13 @@ const CLIENT_EMAIL_CONFIG = {
 
   "Coface Varese": {
     agente: {
-      to:  ["carlo.piccinno@coface.it"],
-      cc:  ["giancarlo.piccinno@coface.it", "andrea.piccinno@coface.it"],
+      // TO = agente dell'appuntamento (lookup automatico)
+      cc:  ["milanouno@coface.it"],
       bcc: [],
     },
     azienda: {
       includeAgentInCc: false,
-      cc:  ["carlo.piccinno@coface.it"],
+      cc:  ["milanouno@coface.it"],
       bcc: [],
     },
     annullo: { cc: [], bcc: [] },
