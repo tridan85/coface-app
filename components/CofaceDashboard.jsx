@@ -962,12 +962,12 @@ const CLIENT_EMAIL_CONFIG = {
     agente: {
       // TO = agente dell'appuntamento (lookup automatico)
       cc:  ["milanouno@coface.it"],
-      bcc: [],
+      bcc: ["tldpacoface@contaq.it"],
     },
     azienda: {
       includeAgentInCc: false,
       cc:  ["milanouno@coface.it"],
-      bcc: [],
+      bcc: ["tldpacoface@contaq.it"],
     },
     annullo: { cc: [], bcc: [] },
   },
