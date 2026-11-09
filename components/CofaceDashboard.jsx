@@ -960,8 +960,8 @@ const CLIENT_EMAIL_CONFIG = {
 
   "Coface Varese": {
     agente: {
-      // TO = agente dell'appuntamento (lookup automatico)
-      cc:  ["milanouno@coface.it"],
+      to:  ["milanouno@coface.it"],
+      cc:  [],
       bcc: ["tldpacoface@contaq.it"],
     },
     azienda: {
