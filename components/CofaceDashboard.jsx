@@ -88,6 +88,7 @@ const CLIENTI_CANONICI = [
   "Alfa Ambiente",
   "Coface Varese",
   "Coface Udine",
+  "Coface Piemonte",
 ];
 
 
@@ -988,6 +989,23 @@ const CLIENT_EMAIL_CONFIG = {
       bcc: ["TLCofaceAssicredit@contaq.it"],
     },
   },
+
+  "Coface Piemonte": {
+    agente: {
+      to:  ["dario.martino@coface.it"],
+      cc:  ["massimo.concon@coface.it", "serena.leone@coface.it"],
+      bcc: ["tlcofaceciemme@contaq.it"],
+    },
+    azienda: {
+      includeAgentInCc: false,
+      cc:  ["dario.martino@coface.it", "massimo.concon@coface.it", "serena.leone@coface.it"],
+      bcc: ["tlcofaceciemme@contaq.it"],
+    },
+    annullo: {
+      cc:  ["massimo.concon@coface.it", "serena.leone@coface.it"],
+      bcc: ["tlcofaceciemme@contaq.it"],
+    },
+  },
 };
 
 
@@ -1021,7 +1039,34 @@ function markEmailSent(type, id) {
 /* ────────────────────────────────────────────────────────────── */
 /* Template email                                                 */
 /* ────────────────────────────────────────────────────────────── */
+// Email agente dedicata a Coface Piemonte (testo fornito dal cliente)
+function makeEmailAgenteCofacePiemonte(r) {
+  const dataGGMM = fmtDate(r?.data);
+  const subject = `Appuntamento telemarketing - Notifica appuntamento Coface - ${dataGGMM} alle ore ${r?.ora || ""} - ${r?.azienda || ""}`;
+  const body = [
+    `Gentile Dario Martino,`,
+    ``,
+    `abbiamo fissato un appuntamento in videocall per il giorno ${dataGGMM} alle ore ${r?.ora || ""}`,
+    ``,
+    `Azienda: ${r?.azienda || ""}`,
+    `P.IVA: ${r?.piva || ""}`,
+    `Indirizzo: ${r?.indirizzo || ""} - ${r?.provincia || ""}`,
+    ``,
+    `Referente: ${r?.referente || ""}`,
+    `Telefono: ${r?.telefono || ""}`,
+    `EMAIL: ${r?.email || ""}`,
+    ``,
+    `NOTE: ${r?.note || ""}`,
+  ].join("\n");
+
+  const cfg = getClientEmailCfg(r, "agente");
+  return { to: cfg.to, cc: cfg.cc, bcc: cfg.bcc, subject, body };
+}
+
 function makeEmailAgente(r) {
+  if (String(r?.cliente || "").trim().toLowerCase() === "coface piemonte") {
+    return makeEmailAgenteCofacePiemonte(r);
+  }
   const isUdine = String(r?.cliente || "").trim().toLowerCase() === "coface udine";
   const dataGGMM = fmtDate(r?.data);
   const subject = isUdine
@@ -1106,6 +1151,31 @@ function makeEmailAziendaCofaceUdine(r) {
   return { to: r?.email || "", cc: cfg.cc, bcc: cfg.bcc, subject, body };
 }
 
+// Email conferma dedicata a Coface Piemonte (testo fornito dal cliente)
+function makeEmailAziendaCofacePiemonte(r) {
+  const dataGGMM = fmtDate(r?.data);
+  const subject = `Conferma appuntamento Coface - ${dataGGMM} alle ore ${r?.ora || ""} - ${r?.azienda || ""}`;
+  const body = [
+    `Gentile ${r?.referente || ""},`,
+    ``,
+    `La presente per confermare l'appuntamento in videocall, per il giorno ${dataGGMM} alle ore ${r?.ora || ""} con il nostro Agente Generale Dario Martino`,
+    ``,
+    `Di seguito una breve sintesi delle soluzioni COFACE che permettono di:`,
+    ``,
+    `- Richiedere informazioni complete in tutto il mondo in tempo reale utili per chi fa export, a condizioni molto competitive`,
+    `- Confrontare i fidi dei provider di informazioni con quelli assicurativi Coface`,
+    `- Sapere se i clienti hanno avuto sinistri o sono assicurati`,
+    `- Conoscere il fido assicurativo e monitorarlo per essere tempestivamente avvisati in caso di revoca fidi Valutare i fidi e affidabilità dei fornitori strategici in Italia e nel mondo`,
+    ``,
+    `Sarà nostra cura contattarla qualche giorno prima per confermare o riprogrammare la data dell'incontro.`,
+    ``,
+    `La ringraziamo per il tempo che ci ha dedicato e le inviamo un cordiale saluto.`,
+  ].join("\n");
+
+  const cfg = getClientEmailCfg(r, "azienda");
+  return { to: r?.email || "", cc: cfg.cc, bcc: cfg.bcc, subject, body };
+}
+
 function makeEmailAzienda(r) {
   const clienteKey = String(r?.cliente || "").trim().toLowerCase();
   if (clienteKey === "alfa ambiente") {
@@ -1113,6 +1183,9 @@ function makeEmailAzienda(r) {
   }
   if (clienteKey === "coface udine") {
     return makeEmailAziendaCofaceUdine(r);
+  }
+  if (clienteKey === "coface piemonte") {
+    return makeEmailAziendaCofacePiemonte(r);
   }
   const dataGGMM = fmtDate(r?.data); // formato gg/mm/aaaa
   const subject = `Conferma appuntamento Coface - ${dataGGMM} alle ore ${r?.ora || ""} - ${r?.azienda || ""}`;
