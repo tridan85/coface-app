@@ -89,6 +89,7 @@ const CLIENTI_CANONICI = [
   "Coface Varese",
   "Coface Udine",
   "Coface Piemonte",
+  "Bianchini Cribis",
 ];
 
 
@@ -948,6 +949,12 @@ const CLIENT_EMAIL_CONFIG = {
   },
 
   "Mastracci Cribis": {
+    agente:  { to: [], cc: [], bcc: [] },
+    azienda: { includeAgentInCc: false, cc: [], bcc: [] },
+    annullo: { cc: [], bcc: [] },
+  },
+
+  "Bianchini Cribis": {
     agente:  { to: [], cc: [], bcc: [] },
     azienda: { includeAgentInCc: false, cc: [], bcc: [] },
     annullo: { cc: [], bcc: [] },

@@ -135,6 +135,7 @@ const CLIENTI_CANONICI = [
   "Coface Varese",
   "Coface Udine",
   "Coface Piemonte",
+  "Bianchini Cribis",
 ];
 
 /* ====== Normalizzazione & Fuzzy-matching agenti ====== */
